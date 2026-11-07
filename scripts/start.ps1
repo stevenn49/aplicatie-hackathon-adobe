@@ -17,23 +17,30 @@
 .PARAMETER SkipDatabase
     Do not touch Docker; assume MySQL is already reachable.
 
+.PARAMETER Detach
+    Start the backend and the frontend and return immediately instead of
+    waiting. Used by the setup and settings scripts when they restart the app.
+
 .EXAMPLE
     .\scripts\start.ps1
+
+.EXAMPLE
+    .\scripts\start.ps1 -Detach
 #>
 [CmdletBinding()]
 param(
     [int]$BackendPort = 8010,
     [int]$FrontendPort = 5173,
-    [switch]$SkipDatabase
+    [switch]$SkipDatabase,
+    [switch]$Detach
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-function Write-Step($Message) { Write-Host "`n==> $Message" -ForegroundColor Cyan }
-function Write-Ok($Message) { Write-Host "    OK  $Message" -ForegroundColor Green }
-function Write-Fail($Message) { Write-Host "    X   $Message" -ForegroundColor Red }
+. (Join-Path $PSScriptRoot "lib.ps1")
+$global:MP_NONINTERACTIVE = $true
 
 if (-not (Test-Path (Join-Path $Root "backend\.env"))) {
     Write-Fail "backend/.env is missing. Run .\scripts\setup.ps1 first."
@@ -69,70 +76,101 @@ if (-not $SkipDatabase) {
 # ---------------------------------------------------------------------------
 # Ports
 # ---------------------------------------------------------------------------
+# A port held by our own backend or frontend is not an error: report it and stop
+# instead of starting a second copy. A foreign process is a hard stop.
+$alreadyRunning = 0
 foreach ($port in @($BackendPort, $FrontendPort)) {
-    $inUse = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    if ($inUse) {
-        Write-Fail "Port $port is already in use (PID $($inUse[0].OwningProcess))."
+    $listener = Get-ProjectListener -Port $port
+    if (-not $listener) { continue }
+
+    if ($listener.IsOurs) {
+        Write-Warn "$($listener.Name) is already listening on port $port (PID $($listener.Pid))."
+        $alreadyRunning++
+    } else {
+        Write-Fail "Port $port is held by '$($listener.Name)' (PID $($listener.Pid)), which is not part of this project."
         Write-Host "    Stop it, or pass -BackendPort / -FrontendPort with a free port." -ForegroundColor Yellow
         exit 1
     }
 }
 
+if ($alreadyRunning -eq 2) {
+    Write-Ok "The app is already running: http://127.0.0.1:$FrontendPort"
+    Write-Host "    To restart it, use option 3 (Stop) then option 2 (Start), or the settings manager." -ForegroundColor Yellow
+    exit 0
+}
+if ($alreadyRunning -eq 1) {
+    Write-Warn "One component is already running; starting only the missing one."
+}
+
 # ---------------------------------------------------------------------------
 # Backend
 # ---------------------------------------------------------------------------
-Write-Step "Starting the backend on $BackendPort"
 $backendOut = Join-Path $env:TEMP "marketpulse-backend.log"
 $backendErr = Join-Path $env:TEMP "marketpulse-backend.err.log"
-$backend = Start-Process -FilePath "python" `
-    -ArgumentList "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "$BackendPort" `
-    -WorkingDirectory (Join-Path $Root "backend") `
-    -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr `
-    -PassThru -WindowStyle Hidden
+$backend = $null
 
-$ready = $false
-for ($i = 0; $i -lt 45; $i++) {
-    try {
-        $health = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/health" -TimeoutSec 2
-        $ready = $true
-        break
-    } catch { Start-Sleep -Seconds 2 }
+if (Get-ProjectListener -Port $BackendPort) {
+    Write-Step "Backend already running on $BackendPort"
+    Write-Ok "Leaving it alone"
+} else {
+    Write-Step "Starting the backend on $BackendPort"
+    $backend = Start-Process -FilePath "python" `
+        -ArgumentList "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "$BackendPort" `
+        -WorkingDirectory (Join-Path $Root "backend") `
+        -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr `
+        -PassThru -WindowStyle Hidden
+
+    $ready = $false
+    for ($i = 0; $i -lt 45; $i++) {
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/health" -TimeoutSec 2
+            $ready = $true
+            break
+        } catch { Start-Sleep -Seconds 2 }
+    }
+    if (-not $ready) {
+        Write-Fail "The backend did not start. Last lines of $backendErr :"
+        Get-Content $backendErr -Tail 20 -ErrorAction SilentlyContinue
+        Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
+    Write-Ok "Backend healthy: database=$($health.database), llm=$($health.llm)"
 }
-if (-not $ready) {
-    Write-Fail "The backend did not start. Last lines of $backendErr :"
-    Get-Content $backendErr -Tail 20 -ErrorAction SilentlyContinue
-    Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
-    exit 1
-}
-Write-Ok "Backend healthy: database=$($health.database), llm=$($health.llm)"
 
 # ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
-Write-Step "Starting the frontend on $FrontendPort"
 $viteOut = Join-Path $env:TEMP "marketpulse-frontend.log"
 $viteErr = Join-Path $env:TEMP "marketpulse-frontend.err.log"
-$frontend = Start-Process -FilePath "npm.cmd" `
-    -ArgumentList "run", "dev", "--", "--port", "$FrontendPort", "--host", "127.0.0.1" `
-    -WorkingDirectory $Root `
-    -RedirectStandardOutput $viteOut -RedirectStandardError $viteErr `
-    -PassThru -WindowStyle Hidden
+$frontend = $null
 
-$viteReady = $false
-for ($i = 0; $i -lt 45; $i++) {
-    try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$FrontendPort/" -TimeoutSec 2 -UseBasicParsing
-        if ($response.StatusCode -eq 200) { $viteReady = $true; break }
-    } catch { Start-Sleep -Seconds 2 }
+if (Get-ProjectListener -Port $FrontendPort) {
+    Write-Step "Frontend already running on $FrontendPort"
+    Write-Ok "Leaving it alone"
+} else {
+    Write-Step "Starting the frontend on $FrontendPort"
+    $frontend = Start-Process -FilePath "npm.cmd" `
+        -ArgumentList "run", "dev", "--", "--port", "$FrontendPort", "--host", "127.0.0.1" `
+        -WorkingDirectory $Root `
+        -RedirectStandardOutput $viteOut -RedirectStandardError $viteErr `
+        -PassThru -WindowStyle Hidden
+
+    $viteReady = $false
+    for ($i = 0; $i -lt 45; $i++) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:$FrontendPort/" -TimeoutSec 2 -UseBasicParsing
+            if ($response.StatusCode -eq 200) { $viteReady = $true; break }
+        } catch { Start-Sleep -Seconds 2 }
+    }
+    if (-not $viteReady) {
+        Write-Fail "The frontend did not start. Last lines of $viteErr :"
+        Get-Content $viteErr -Tail 20 -ErrorAction SilentlyContinue
+        if ($backend) { Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue }
+        Stop-Process -Id $frontend.Id -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
+    Write-Ok "Frontend serving"
 }
-if (-not $viteReady) {
-    Write-Fail "The frontend did not start. Last lines of $viteErr :"
-    Get-Content $viteErr -Tail 20 -ErrorAction SilentlyContinue
-    Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $frontend.Id -Force -ErrorAction SilentlyContinue
-    exit 1
-}
-Write-Ok "Frontend serving"
 
 Write-Host @"
 
@@ -145,16 +183,37 @@ MarketPulse AI is running.
   Logs      : $backendOut
               $viteOut
 
-Press Ctrl+C to stop the backend and the frontend.
-The MySQL container keeps running (stop it with: docker compose stop).
-
 "@ -ForegroundColor Green
 
+# -Detach: the caller (setup or settings) keeps the processes running and
+# returns to its own flow.
+#
+# [Environment]::Exit rather than `exit`: the processes started with
+# Start-Process hold inherited console handles, and a plain `exit` leaves this
+# host waiting on them, which makes a scripted caller appear to hang.
+if ($Detach) {
+    Write-Host "Started in the background. Stop it with .\run.ps1 (option 3)." -ForegroundColor Yellow
+    [Environment]::Exit(0)
+}
+
+$watched = @()
+if ($backend) { $watched += $backend.Id }
+if ($frontend) { $watched += $frontend.Id }
+
+if ($watched.Count -eq 0) {
+    Write-Host "Both components were already running; nothing to wait for." -ForegroundColor Yellow
+    exit 0
+}
+
+Write-Host "Press Ctrl+C to stop the processes this script started." -ForegroundColor Gray
+Write-Host "The MySQL container keeps running (stop it with: docker compose stop)." -ForegroundColor Gray
+
 try {
-    Wait-Process -Id $backend.Id, $frontend.Id -ErrorAction Stop
+    Wait-Process -Id $watched -ErrorAction Stop
 } finally {
     Write-Host "`nStopping the processes this script started..." -ForegroundColor Yellow
-    Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $frontend.Id -Force -ErrorAction SilentlyContinue
+    foreach ($id in $watched) {
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "Stopped. The database container is left running." -ForegroundColor Yellow
 }

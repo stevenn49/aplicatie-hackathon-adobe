@@ -21,7 +21,35 @@ fallback and no placeholder number: when a value cannot be derived, the UI says
 
 ---
 
-## Cold setup
+## Quick start
+
+One interactive entry point does everything:
+
+```powershell
+.\run.ps1
+```
+
+```bash
+./run.sh
+```
+
+| Option | What it does |
+| --- | --- |
+| 1 Setup | installs everything, detects the database options, asks for API keys |
+| 2 Start | runs the database, the backend and the dashboard |
+| 3 Stop | stops the backend and the frontend |
+| 4 Status | what is running and what is configured |
+| 5 Settings | database, port, API keys, LLM model |
+| 6 Reload | applies new API keys to the running backend, no restart |
+| 7 Tests | backend, build and end-to-end |
+| 8 Reset DB | drops and reseeds the Docker database |
+| 9 Docs | where the documentation lives |
+
+The scripts are safe to re-run. They detect what is already running: starting
+twice leaves the existing processes alone instead of spawning a second copy, and
+a port held by an unrelated program is reported and never killed.
+
+## Cold setup (scripted)
 
 ### Windows (PowerShell)
 
@@ -40,9 +68,20 @@ chmod +x scripts/*.sh
 ./scripts/setup.sh
 ```
 
-The setup script checks the toolchain, prepares the database, writes
-`backend/.env` and `.env.local`, and installs both dependency sets. It is safe to
-run again.
+The setup script checks the toolchain, **detects whether Docker and/or a native
+MySQL are available and lets you choose**, asks for the API keys you want, writes
+`backend/.env` and `.env.local`, installs both dependency sets, and offers to
+start the app. It is safe to run again.
+
+Non-interactive, for automation:
+
+```powershell
+.\scripts\setup.ps1 -NonInteractive -Database docker -Start
+```
+
+```bash
+./scripts/setup.sh --non-interactive --database docker --start
+```
 
 ### Choosing the database
 
@@ -95,8 +134,9 @@ own scratch work.
 | API docs (OpenAPI) | http://127.0.0.1:8010/docs |
 
 Port 8010 rather than 8000: some development machines already have a service on
-8000. Change it with `-BackendPort` / `--backend-port` and update
-`VITE_API_URL` in `.env.local` to match.
+8000. The setup script detects a busy port and proposes the next free one. To
+change it later, use the settings manager (option 3) — it updates `VITE_API_URL`
+in `.env.local` at the same time.
 
 ### Manual start
 
@@ -110,6 +150,74 @@ npm run dev
 
 ---
 
+## APIs and keys
+
+Everything the app talks to, and whether it needs a key.
+
+### No key required — working out of the box
+
+| Source | What it provides | Where |
+| --- | --- | --- |
+| **eMAG** | product catalogue, prices, ratings, public reviews (HTML parsing) | `backend/connectors/emag.py` |
+| **Reddit** | discussions and opinions via the public `.json` endpoints | `backend/connectors/reddit.py` |
+| **Google Trends** | search interest via `pytrends` | `backend/connectors/google_trends.py` |
+| **Hacker News** | tech discussions via the Algolia search API | `backend/connectors/alternative_reviews.py` |
+
+A descriptive `REDDIT_USER_AGENT` is polite and reduces rate-limiting. The
+`REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` fields exist in the config but the
+connector does not use them yet — it only reads public JSON.
+
+### Key required — each one enables a feature
+
+| Service | Variable | Enables | Get a key |
+| --- | --- | --- | --- |
+| **OpenRouter** | `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` | AI Recommendations executive summary, product review summary, marketing opportunities | https://openrouter.ai/keys |
+| **X / Twitter** | `TWITTER_BEARER_TOKEN` | brand mention collection | https://developer.x.com/en/portal/dashboard |
+| **Groq** | `GROQ_API_KEY` | the AI assistant, if `AI_PROVIDER=groq` | https://console.groq.com/keys |
+| **Gemini** | `GEMINI_API_KEY` | the AI assistant, if `AI_PROVIDER=gemini` | https://aistudio.google.com/apikey |
+
+### Local, no key
+
+| Service | Variable | Notes |
+| --- | --- | --- |
+| **Ollama** | `OLLAMA_URL` (default `http://localhost:11434`) | the AI assistant, if `AI_PROVIDER=ollama`. Install from https://ollama.com and run `ollama pull llama3.2` once. |
+
+### Choosing an OpenRouter model
+
+The setup and the settings manager both fetch the **live free catalogue** from
+`https://openrouter.ai/api/v1/models`, filter the models whose prompt and
+completion prices are zero, and show them as a numbered list sorted by context
+length, with the large-context ones marked.
+
+The default is **`stealth/crouton-alpha`** (1M-token context, free). It is marked
+with `*` in the list and pressing Enter selects it. The other large-context free
+models are listed above it — the 1M ones (`nvidia/nemotron-3-ultra-550b-a55b:free`,
+`nvidia/nemotron-3.5-lightning:free`, …) and the 256k ones
+(`cohere/north-mini-code:free`, `google/gemma-4-31b-it:free`, …).
+
+You pick a number; the id is written to `backend/.env`. You can also type any
+model id by hand, for a paid model or when offline.
+
+```
+      [ 1]  google/lyria-3-clip-preview                          1,049k ctx
+      [ 2]  google/lyria-3-pro-preview                           1,049k ctx
+      [ 3]  stealth/crouton-alpha                                1,049k ctx   *
+      [ 4]  nvidia/nemotron-3-ultra-550b-a55b:free               1,000k ctx
+      [ 5]  nvidia/nemotron-3.5-lightning:free                   1,000k ctx
+      ...
+      [13]  cohere/north-mini-code:free                            256k ctx
+```
+
+```powershell
+.\scripts\settings.ps1      # option 4 - OpenRouter
+```
+
+```bash
+./scripts/settings.sh       # option 4 - OpenRouter
+```
+
+The catalogue is public, so the list appears before the key is ever used.
+
 ## Optional: enable the LLM surfaces
 
 The AI Recommendations executive summary, the product review summary and the
@@ -118,7 +226,7 @@ marketing opportunities can be written by a model through
 three surfaces use the deterministic engine and the API reports
 `"source": "derived"` instead of `"llm"`.
 
-Add to `backend/.env`:
+Add to `backend/.env`, or let the setup script do it:
 
 ```
 OPENROUTER_API_KEY="sk-or-v1-..."
@@ -129,6 +237,46 @@ Responses are cached in the `llm_cache` table for 12 hours, so repeated page
 loads do not spend the free-tier quota.
 
 **Never commit `backend/.env` or `.env.local`.** Both are gitignored.
+
+## Settings
+
+Everything above can be changed without editing files:
+
+```powershell
+.\scripts\settings.ps1          # interactive menu
+.\scripts\settings.ps1 -Show    # print the current configuration
+```
+
+```bash
+./scripts/settings.sh
+./scripts/settings.sh --show
+```
+
+It covers the database connection, the backend port (and `VITE_API_URL`), the
+OpenRouter key and model, the assistant provider and its key, the X/Twitter
+token and the Reddit user agent. Secrets are masked on screen. Option 8 runs a
+health check: the database credentials, the port, and whether the configured
+OpenRouter model is still free.
+
+### Changing a key on a running server
+
+API keys and the LLM model apply **without a restart**:
+
+```bash
+curl -X POST http://127.0.0.1:8010/api/admin/reload
+```
+
+The settings manager calls this for you after every key change, and `run.ps1` /
+`run.sh` expose it as option 6. The endpoint re-reads `backend/.env` and rebuilds
+the LLM client in place, so the database connections are never dropped.
+
+It is local-only: a request from anything other than `127.0.0.1` / `::1` gets a
+403. `GET /api/admin/config` returns the non-secret part of the live
+configuration, which is what the settings manager shows.
+
+`DATABASE_URL`, `PORT` and `HOST` are bound when the process starts and still
+need a real restart; the reload response lists them under
+`restart_required_for`.
 
 ---
 
@@ -150,7 +298,8 @@ src/
   pages/          the eight dashboard pages
   services/       the single HTTP layer (api.js)
 e2e/              Playwright end-to-end tests
-scripts/          setup and start scripts
+scripts/          setup, start, settings and shared helpers
+run.ps1 / run.sh  interactive launcher for everything above
 ```
 
 ---

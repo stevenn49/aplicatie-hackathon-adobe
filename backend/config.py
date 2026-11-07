@@ -48,7 +48,9 @@ class Settings(BaseSettings):
     # OpenRouter LLM. Empty key = the LLM surfaces degrade to the rule-based engine
     # and say so; nothing is fabricated.
     OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = ""
+    # Free model used when the key is present and no model was chosen explicitly.
+    # stealth/crouton-alpha has a 1M-token context and costs nothing on OpenRouter.
+    OPENROUTER_MODEL: str = "stealth/crouton-alpha"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_TIMEOUT: int = 60
     OPENROUTER_MAX_TOKENS: int = 900
@@ -70,3 +72,24 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def reload_settings() -> "Settings":
+    """
+    Re-reads backend/.env and updates the live `settings` object in place.
+
+    The API keeps one Settings instance for the whole process, so a key written
+    to .env while the server is running would otherwise only take effect after a
+    restart. Updating the fields in place lets the admin endpoint apply a change
+    without dropping the database connections.
+
+    Returns the same object, refreshed.
+    """
+    fresh = Settings()
+    for field_name in fresh.model_fields:
+        try:
+            setattr(settings, field_name, getattr(fresh, field_name))
+        except Exception:
+            # A read-only or computed field is skipped rather than failing the reload.
+            continue
+    return settings

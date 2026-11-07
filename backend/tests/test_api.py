@@ -244,6 +244,47 @@ def test_legacy_endpoints_still_work(client):
     assert client.get("/api/products/1/reviews").status_code == 200
 
 
+def test_admin_config_hides_secrets(client):
+    """The admin view reports state, never a key."""
+    response = client.get("/api/admin/config")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["llm"] in ("configured", "not configured")
+    assert body["database_backend"].startswith("mysql")
+    assert "OPENROUTER_API_KEY" not in body
+    assert "sk-or-" not in response.text
+    assert "TWITTER_BEARER_TOKEN" not in body
+
+
+def test_admin_reload_applies_a_model_change(client, monkeypatch):
+    """
+    A model written to the environment must apply without a restart: the reload
+    endpoint re-reads the settings and rebuilds the LLM client.
+    """
+    from config import settings, reload_settings
+    from services.llm_service import llm_service
+
+    monkeypatch.setenv("OPENROUTER_MODEL", "test/model-after-reload")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+
+    response = client.post("/api/admin/reload")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["status"] == "reloaded"
+    assert settings.OPENROUTER_MODEL == "test/model-after-reload"
+    assert llm_service.model == "test/model-after-reload"
+    # No key, so the LLM stays off even with a model set.
+    assert body["llm"] == "not configured"
+    assert "DATABASE_URL" in body["restart_required_for"]
+
+    # Restore the defaults so later tests see a clean configuration.
+    monkeypatch.setenv("OPENROUTER_MODEL", "")
+    reload_settings()
+    llm_service.refresh()
+
+
 def test_price_change_uses_oldest_point(client):
     """
     Regression: forecasting used prices[-1] as "oldest", so the change was always

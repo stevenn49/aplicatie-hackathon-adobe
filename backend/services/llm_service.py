@@ -34,13 +34,29 @@ CACHE_TTL_HOURS = 12
 
 class LLMService:
     def __init__(self) -> None:
-        self.enabled = settings.llm_enabled
-        self.model = settings.OPENROUTER_MODEL
-        self.base_url = settings.OPENROUTER_BASE_URL.rstrip("/")
+        self._read_settings()
         if not self.enabled:
             logger.info(
                 "OpenRouter is not configured (OPENROUTER_API_KEY / OPENROUTER_MODEL empty). "
                 "LLM surfaces will use the derived engine and say so."
+            )
+
+    def _read_settings(self) -> None:
+        """Copies the live settings into the instance fields."""
+        self.enabled = settings.llm_enabled
+        self.model = settings.OPENROUTER_MODEL
+        self.base_url = settings.OPENROUTER_BASE_URL.rstrip("/")
+
+    def refresh(self) -> None:
+        """
+        Re-reads the settings after `reload_settings()` changed them, so a key
+        written to .env applies without restarting the process.
+        """
+        was_enabled = self.enabled
+        self._read_settings()
+        if was_enabled != self.enabled:
+            logger.info(
+                f"LLM service {'enabled' if self.enabled else 'disabled'} after a configuration reload."
             )
 
     # ------------------------------------------------------------------ #

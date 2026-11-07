@@ -11,6 +11,7 @@ from database.seeds import seed_database_if_empty
 from api.products import router as products_router
 from api.analytics import router as analytics_router
 from api.marketing import router as marketing_router
+from api.admin import router as admin_router
 
 # Setup structured logging
 logging.basicConfig(
@@ -60,6 +61,7 @@ app.add_middleware(
 app.include_router(products_router)
 app.include_router(analytics_router)
 app.include_router(marketing_router)
+app.include_router(admin_router)
 
 
 @app.get("/", tags=["General"])
