@@ -35,7 +35,7 @@ export default function AIRecommendations() {
         action={
           <span className="ai-status-pill">
             <span className="ai-pulse"><Sparkles size={13} /></span>
-            {summary.source === "llm" ? "OpenRouter model" : "Derived engine"}
+            {summary.source === "llm" ? "OpenRouter model" : summary.source === "pending" ? "Generating…" : "Derived engine"}
             <span className="mini-online" />
           </span>
         }
@@ -47,7 +47,11 @@ export default function AIRecommendations() {
           <div className="summary-topline">
             <span className="eyebrow">EXECUTIVE SUMMARY</span>
             <span className="summary-generated">
-              {summary.source === "llm" ? "Written by the configured model" : "Derived from stored data"}
+              {summary.source === "llm"
+                ? "Written by the configured model"
+                : summary.source === "pending"
+                  ? "Derived now; the written summary is generating"
+                  : "Derived from stored data"}
               <span className="live-dot" />
             </span>
           </div>

@@ -198,7 +198,11 @@ function Invoke-Reload {
 
     . (Join-Path $Root "scripts\lib.ps1")
     $global:MP_NONINTERACTIVE = $true
-    $result = Invoke-ApiReload -BackendPort $state.BackendPort
+    $assistantUrl = ""
+    if (Test-Path $FrontendEnv) {
+        $assistantUrl = Get-EnvValue -Path $FrontendEnv -Key "VITE_AI_API_URL"
+    }
+    $result = Invoke-ApiReload -BackendPort $state.BackendPort -AssistantUrl $assistantUrl
     if ($result -eq "reloaded") {
         Write-Info "Database and port changes still need a restart (option 3 then 2)."
     }

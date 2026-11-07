@@ -293,25 +293,64 @@ function Restart-ProjectStack {
 
     Returns one of: "reloaded", "not-running", "failed".
 #>
+<#
+    Reloads both services that read backend/.env:
+
+      - the main API on the backend port (`/api/admin/reload`);
+      - the assistant service on the port in VITE_AI_API_URL (`/admin/reload`),
+        when it is configured and running.
+
+    Returns "reloaded" when at least one answered, "not-running" when neither is
+    up, "failed" otherwise.
+#>
 function Invoke-ApiReload {
-    param([int]$BackendPort = 8010)
+    param(
+        [int]$BackendPort = 8010,
+        [string]$AssistantUrl = ""
+    )
 
-    if (-not (Test-Port -Port $BackendPort)) { return "not-running" }
+    $reloaded = 0
+    $attempted = 0
 
-    try {
-        $result = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$BackendPort/api/admin/reload" -TimeoutSec 10
-        Write-Ok "The running API reloaded its configuration."
-        if ($result.llm) { Write-Note "LLM: $($result.llm)$(if ($result.llm_model) { " ($($result.llm_model))" })" }
-        if ($result.changes -and $result.changes.Count -gt 0) {
-            foreach ($change in $result.changes) { Write-Note "changed: $change" }
-        } else {
-            Write-Note "No value changed relative to what the process already held."
+    if (Test-Port -Port $BackendPort) {
+        $attempted++
+        try {
+            $result = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$BackendPort/api/admin/reload" -TimeoutSec 15
+            Write-Ok "The main API reloaded its configuration."
+            if ($result.llm) { Write-Note "LLM: $($result.llm)$(if ($result.llm_model) { " ($($result.llm_model))" })" }
+            if ($result.changes -and $result.changes.Count -gt 0) {
+                foreach ($change in $result.changes) { Write-Note "changed: $change" }
+            }
+            $reloaded++
+        } catch {
+            Write-Warn "The main API did not accept the reload: $($_.Exception.Message)"
         }
-        return "reloaded"
-    } catch {
-        Write-Warn "The API did not accept the reload: $($_.Exception.Message)"
-        return "failed"
     }
+
+    if ($AssistantUrl) {
+        $assistantPort = 0
+        if ($AssistantUrl -match ':(\d+)') { $assistantPort = [int]$Matches[1] }
+        if ($assistantPort -gt 0 -and (Test-Port -Port $assistantPort)) {
+            $attempted++
+            try {
+                $result = Invoke-RestMethod -Method Post -Uri "$($AssistantUrl.TrimEnd('/'))/admin/reload" -TimeoutSec 15
+                Write-Ok "The assistant service reloaded: provider=$($result.provider), models=$($result.models -join ', ')"
+                if ($result.changes -and $result.changes.Count -gt 0) {
+                    foreach ($change in $result.changes) { Write-Note "changed: $change" }
+                }
+                $reloaded++
+            } catch {
+                Write-Warn "The assistant service did not accept the reload: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    if ($attempted -eq 0) { return "not-running" }
+    if ($reloaded -eq 0) { return "failed" }
+    if ($reloaded -eq 1 -and $attempted -gt 1) {
+        Write-Note "Only one service answered; the other is not running."
+    }
+    return "reloaded"
 }
 
 function Invoke-RestartPrompt {
@@ -419,7 +458,7 @@ function Select-OpenRouterModel {
 
     # The default is the model the project ships with. It is marked in the list
     # and pressing Enter picks it.
-    $defaultModel = "stealth/crouton-alpha"
+    $defaultModel = "dots-studio/dots-3-note-preview:free"
     $defaultIndex = 0
     for ($i = 0; $i -lt $models.Count; $i++) {
         if ($models[$i].Id -eq $defaultModel) { $defaultIndex = $i + 1; break }

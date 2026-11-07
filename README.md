@@ -156,23 +156,48 @@ Everything the app talks to, and whether it needs a key.
 
 ### No key required — working out of the box
 
-| Source | What it provides | Where |
-| --- | --- | --- |
-| **eMAG** | product catalogue, prices, ratings, public reviews (HTML parsing) | `backend/connectors/emag.py` |
-| **Reddit** | discussions and opinions via the public `.json` endpoints | `backend/connectors/reddit.py` |
-| **Google Trends** | search interest via `pytrends` | `backend/connectors/google_trends.py` |
-| **Hacker News** | tech discussions via the Algolia search API | `backend/connectors/alternative_reviews.py` |
+| Source | What it provides | Where | Status |
+| --- | --- | --- | --- |
+| **eMAG** | product catalogue, prices, ratings, public reviews (HTML parsing) | `backend/connectors/emag.py` | works, no key |
+| **Hacker News** | tech discussions via the Algolia search API | `backend/connectors/alternative_reviews.py` | works, no key |
+| **Google Trends** | search interest via `pytrends` | `backend/connectors/google_trends.py` | works, no key (Google throttles by IP) |
+| **Reddit** | discussions and opinions | `backend/connectors/reddit.py` | **OAuth required since 2026** — see below |
 
-A descriptive `REDDIT_USER_AGENT` is polite and reduces rate-limiting. The
-`REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` fields exist in the config but the
-connector does not use them yet — it only reads public JSON.
+### Reddit: the public `.json` endpoints no longer work
+
+Reddit began returning **403 to unauthenticated traffic** around May 2026, and
+datacenter IPs are blocked first. The connector was tested on 2026-11-07 and the
+public endpoint answered `403 Forbidden`.
+
+The supported route is OAuth: register an app at https://www.reddit.com/prefs/apps,
+then set `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET`. The connector uses the
+client-credentials flow, caches the token, and falls back to the public endpoint
+only if OAuth is not configured. The free tier allows **100 queries per minute
+per client id** and is **non-commercial only**; Reddit stops accepting new public
+API requests after 31 October 2026 and closes public access in March 2027.
+
+The connector reports its state in `last_status`: `ok_oauth`, `ok_public`,
+`oauth_rejected`, `unavailable`. It never returns invented data.
+
+### X / Twitter: no free tier left
+
+The free tier closed to new developers on **6 February 2026**. Access is now
+pay-per-use from prepaid credits: about **$0.005 per post read**, $0.015 per post
+written, $0.20 for a post containing a link, capped at 3 million post reads a
+month. A bearer token alone is not enough — the project must also be enrolled in
+billing, or calls return 402.
+
+So `TWITTER_BEARER_TOKEN` is optional and only useful if you are willing to fund
+credits. Without it the connector returns nothing and the dashboard simply has
+one fewer source.
 
 ### Key required — each one enables a feature
 
 | Service | Variable | Enables | Get a key |
 | --- | --- | --- | --- |
-| **OpenRouter** | `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` | AI Recommendations executive summary, product review summary, marketing opportunities | https://openrouter.ai/keys |
-| **X / Twitter** | `TWITTER_BEARER_TOKEN` | brand mention collection | https://developer.x.com/en/portal/dashboard |
+| **OpenRouter** | `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` | AI Recommendations executive summary, product review summary, marketing opportunities, **and the AI assistant** | https://openrouter.ai/keys |
+| **X / Twitter** | `TWITTER_BEARER_TOKEN` | brand mention collection (paid) | https://developer.x.com/en/portal/dashboard |
+| **Reddit** | `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` | Reddit discussions (free, non-commercial) | https://www.reddit.com/prefs/apps |
 | **Groq** | `GROQ_API_KEY` | the AI assistant, if `AI_PROVIDER=groq` | https://console.groq.com/keys |
 | **Gemini** | `GEMINI_API_KEY` | the AI assistant, if `AI_PROVIDER=gemini` | https://aistudio.google.com/apikey |
 
@@ -182,6 +207,22 @@ connector does not use them yet — it only reads public JSON.
 | --- | --- | --- |
 | **Ollama** | `OLLAMA_URL` (default `http://localhost:11434`) | the AI assistant, if `AI_PROVIDER=ollama`. Install from https://ollama.com and run `ollama pull llama3.2` once. |
 
+### What is mandatory
+
+The app runs with **none** of these keys: the dashboard, the sentiment analysis,
+the price history, the segments, the competitor matrix and the derived
+recommendations all work from the seeded and collected data.
+
+Only one key is worth setting for a demo, and it is OpenRouter — it lights up
+every AI surface at once, including the assistant.
+
+| Feature | Needs |
+| --- | --- |
+| Dashboard, charts, comparisons, derived recommendations | nothing |
+| LLM-written summaries and assistant | OpenRouter (or Groq/Gemini/Ollama for the assistant only) |
+| Reddit as a data source | Reddit OAuth |
+| X/Twitter as a data source | X credits + bearer token |
+
 ### Choosing an OpenRouter model
 
 The setup and the settings manager both fetch the **live free catalogue** from
@@ -189,24 +230,49 @@ The setup and the settings manager both fetch the **live free catalogue** from
 completion prices are zero, and show them as a numbered list sorted by context
 length, with the large-context ones marked.
 
-The default is **`stealth/crouton-alpha`** (1M-token context, free). It is marked
-with `*` in the list and pressing Enter selects it. The other large-context free
-models are listed above it — the 1M ones (`nvidia/nemotron-3-ultra-550b-a55b:free`,
-`nvidia/nemotron-3.5-lightning:free`, …) and the 256k ones
-(`cohere/north-mini-code:free`, `google/gemma-4-31b-it:free`, …).
+The default is **`dots-studio/dots-3-note-preview:free`** (512k context, free,
+no region lock). It is marked with `*` in the list and pressing Enter selects it.
 
 You pick a number; the id is written to `backend/.env`. You can also type any
 model id by hand, for a paid model or when offline.
 
 ```
-      [ 1]  google/lyria-3-clip-preview                          1,049k ctx
-      [ 2]  google/lyria-3-pro-preview                           1,049k ctx
-      [ 3]  stealth/crouton-alpha                                1,049k ctx   *
+      [ 1]  google/lyria-3-clip-preview                          1,048k ctx
+      [ 2]  google/lyria-3-pro-preview                           1,048k ctx
+      [ 3]  stealth/crouton-alpha                                1,048k ctx
       [ 4]  nvidia/nemotron-3-ultra-550b-a55b:free               1,000k ctx
-      [ 5]  nvidia/nemotron-3.5-lightning:free                   1,000k ctx
+      ...
+      [ 7]  dots-studio/dots-3-note-preview:free                   512k ctx   *
       ...
       [13]  cohere/north-mini-code:free                            256k ctx
 ```
+
+**Region locks are real.** `stealth/crouton-alpha` is the largest free model but
+OpenRouter answers `403 This model is not available in your region` from some
+networks. `dots-studio/dots-3-note-preview:free` works and is the default for
+that reason. Probe what your network can reach with:
+
+```bash
+cd backend && python tests/probe_openrouter_models.py
+```
+
+### Reasoning models need a large output budget
+
+`dots-3-note-preview` is a reasoning model: it spends thousands of tokens
+thinking before it writes anything. With a 900-token budget the response came
+back **empty** with `finish_reason: length`.
+
+The service handles this by reading each model's own limits from
+`/api/v1/models` and sizing the request from them:
+
+- `OPENROUTER_MAX_TOKENS=65536` — the ceiling; the service caps it against the
+  model's `top_provider.max_completion_tokens` (460,800 for this model), so a
+  model that allows less is never over-asked.
+- `OPENROUTER_REASONING_EFFORT=high` — sent as `reasoning.effort` for models that
+  advertise the `reasoning` parameter.
+
+A reasoning model answers in 15–100 seconds. That is why the three LLM surfaces
+are cached in the `llm_cache` table for 12 hours.
 
 ```powershell
 .\scripts\settings.ps1      # option 4 - OpenRouter

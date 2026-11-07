@@ -49,13 +49,30 @@ class Settings(BaseSettings):
     # and say so; nothing is fabricated.
     OPENROUTER_API_KEY: str = ""
     # Free model used when the key is present and no model was chosen explicitly.
-    # stealth/crouton-alpha has a 1M-token context and costs nothing on OpenRouter.
-    OPENROUTER_MODEL: str = "stealth/crouton-alpha"
+    # dots-3-note-preview has a 512k-token context, costs nothing, and is not region-locked.
+    OPENROUTER_MODEL: str = "dots-studio/dots-3-note-preview:free"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_TIMEOUT: int = 60
-    OPENROUTER_MAX_TOKENS: int = 900
+    OPENROUTER_TIMEOUT: int = 300
+    # Output budget. Reasoning models spend most of it thinking before they emit
+    # any content: dots-3-note-preview used ~5,300 reasoning tokens before the
+    # JSON summary, and 900 came back empty with finish_reason=length.
+    #
+    # The service caps this against the model's own `max_completion_tokens` from
+    # /api/v1/models, so a model that allows less is never over-asked. 64k is the
+    # default because the configured model allows 460,800.
+    OPENROUTER_MAX_TOKENS: int = 65536
+    # Sent as `reasoning.effort` for models that advertise the `reasoning`
+    # parameter. "high" gives a reasoning model room to plan before answering.
+    OPENROUTER_REASONING_EFFORT: str = "high"
     OPENROUTER_APP_NAME: str = "MarketPulse AI"
     OPENROUTER_APP_URL: str = "http://localhost:5173"
+
+    # The in-app assistant (backend/server.py) reuses the OpenRouter key and
+    # model by default, so one key covers every AI surface.
+    AI_PROVIDER: str = "openrouter"
+    GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    OLLAMA_URL: str = "http://localhost:11434"
 
     @property
     def cors_origins(self) -> List[str]:

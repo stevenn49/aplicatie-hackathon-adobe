@@ -323,9 +323,11 @@ export default function ProductAnalysis() {
                           <p>{detail.review_summary}</p>
                         ) : (
                           <p className="muted">
-                            {detail.reviews.length
-                              ? `${detail.reviews.length} reviews analysed. Configure an OpenRouter model to generate a written summary; the numbers below come from the stored reviews.`
-                              : "No reviews collected for this product yet."}
+                            {detail.review_summary_source === "pending"
+                              ? `${detail.reviews.length} reviews analysed. The written summary is generating; reopen this product in a moment.`
+                              : detail.reviews.length
+                                ? `${detail.reviews.length} reviews analysed. Configure an OpenRouter model to generate a written summary; the numbers below come from the stored reviews.`
+                                : "No reviews collected for this product yet."}
                           </p>
                         )}
                         <div>

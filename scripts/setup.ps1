@@ -255,7 +255,7 @@ Write-Host @"
 
 $currentOpenRouterKey = Get-EnvValue -Path $backendEnv -Key "OPENROUTER_API_KEY"
 $currentOpenRouterModel = Get-EnvValue -Path $backendEnv -Key "OPENROUTER_MODEL"
-if (-not $currentOpenRouterModel) { $currentOpenRouterModel = "stealth/crouton-alpha" }
+if (-not $currentOpenRouterModel) { $currentOpenRouterModel = "dots-studio/dots-3-note-preview:free" }
 
 Write-Host "    OpenRouter - powers the executive summary, the review summary and" -ForegroundColor White
 Write-Host "                 the marketing opportunities. Free models available." -ForegroundColor Gray
@@ -277,17 +277,24 @@ if ($openRouterKey) {
 
 Write-Host ""
 Write-Host "    AI assistant (the Ask AI panel) - a separate service in backend/server.py." -ForegroundColor White
-Write-Host "      ollama  runs locally, no key, needs https://ollama.com" -ForegroundColor Gray
-Write-Host "      groq    free key, fast          https://console.groq.com/keys" -ForegroundColor Gray
-Write-Host "      gemini  free key                https://aistudio.google.com/apikey" -ForegroundColor Gray
-Write-Host "      off     do not enable the assistant" -ForegroundColor Gray
+Write-Host "      openrouter  reuses the OpenRouter key and model above (default)" -ForegroundColor Gray
+Write-Host "      ollama      runs locally, no key, needs https://ollama.com" -ForegroundColor Gray
+Write-Host "      groq        free key, fast          https://console.groq.com/keys" -ForegroundColor Gray
+Write-Host "      gemini      free key                https://aistudio.google.com/apikey" -ForegroundColor Gray
+Write-Host "      off         do not enable the assistant" -ForegroundColor Gray
 $currentProvider = Get-EnvValue -Path $backendEnv -Key "AI_PROVIDER"
-if (-not $currentProvider) { $currentProvider = "ollama" }
-$provider = Read-Choice -Prompt "Assistant provider" -Options @("ollama", "groq", "gemini", "off") -Default $(if ($NonInteractive) { "off" } else { $currentProvider })
+if (-not $currentProvider) { $currentProvider = "openrouter" }
+$provider = Read-Choice -Prompt "Assistant provider" -Options @("openrouter", "ollama", "groq", "gemini", "off") -Default $(if ($NonInteractive) { "off" } else { $currentProvider })
 
 if ($provider -ne "off") {
     Set-EnvValue -Path $backendEnv -Key "AI_PROVIDER" -Value $provider
-    if ($provider -eq "groq") {
+    if ($provider -eq "openrouter") {
+        if ($openRouterKey) {
+            Write-Ok "Assistant -> openrouter, using model $model"
+        } else {
+            Write-Warn "No OpenRouter key was given, so the assistant will not answer until OPENROUTER_API_KEY is set."
+        }
+    } elseif ($provider -eq "groq") {
         $groqKey = Read-Secret -Prompt "Groq API key" -Default (Get-EnvValue -Path $backendEnv -Key "GROQ_API_KEY")
         if ($groqKey) { Set-EnvValue -Path $backendEnv -Key "GROQ_API_KEY" -Value $groqKey; Write-Ok "Groq configured ($(Mask $groqKey))" }
         else { Write-Warn "No Groq key; the assistant will fail until GROQ_API_KEY is set." }
@@ -308,9 +315,13 @@ if ($provider -ne "off") {
 }
 
 Write-Host ""
-Write-Host "    X / Twitter - brand mention collection. Needs a bearer token." -ForegroundColor White
+Write-Host "    X / Twitter - brand mention collection. The free tier closed to new" -ForegroundColor White
+Write-Host "    developers in February 2026; access is now pay-per-use (~$0.005 per post" -ForegroundColor Gray
+Write-Host "    read). A bearer token alone is not enough without credits." -ForegroundColor Gray
 Write-Host "                  https://developer.x.com/en/portal/dashboard" -ForegroundColor DarkGray
-$twitterToken = Read-Secret -Prompt "X/Twitter bearer token" -Default (Get-EnvValue -Path $backendEnv -Key "TWITTER_BEARER_TOKEN")
+$currentTwitter = Get-EnvValue -Path $backendEnv -Key "TWITTER_BEARER_TOKEN"
+Write-Note "Current: $(Mask $currentTwitter)"
+$twitterToken = Read-Secret -Prompt "X/Twitter bearer token" -Default $currentTwitter
 if ($twitterToken) {
     Set-EnvValue -Path $backendEnv -Key "TWITTER_BEARER_TOKEN" -Value $twitterToken
     Write-Ok "X/Twitter configured ($(Mask $twitterToken))"
@@ -319,11 +330,26 @@ if ($twitterToken) {
 }
 
 Write-Host ""
-Write-Host "    Reddit - the connector uses the public .json endpoints, so no key is" -ForegroundColor White
-Write-Host "             required. A descriptive User-Agent is recommended." -ForegroundColor Gray
-$redditUa = Read-Text -Prompt "Reddit User-Agent" -Default $(if (Get-EnvValue -Path $backendEnv -Key "REDDIT_USER_AGENT") { Get-EnvValue -Path $backendEnv -Key "REDDIT_USER_AGENT" } else { "MarketPulseAI/1.0 by MarketPulseTeam" })
+Write-Host "    Reddit - since May 2026 the public .json endpoints return 403 to" -ForegroundColor White
+Write-Host "    unauthenticated and datacenter traffic. The connector uses them only as" -ForegroundColor Gray
+Write-Host "    a fallback; with REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET it authenticates" -ForegroundColor Gray
+Write-Host "    through OAuth (100 queries/minute, non-commercial)." -ForegroundColor Gray
+$currentRedditId = Get-EnvValue -Path $backendEnv -Key "REDDIT_CLIENT_ID"
+$currentRedditSecret = Get-EnvValue -Path $backendEnv -Key "REDDIT_CLIENT_SECRET"
+$currentRedditUa = Get-EnvValue -Path $backendEnv -Key "REDDIT_USER_AGENT"
+Write-Note "Current client id: $(Mask $currentRedditId)"
+Write-Note "Current user agent: $(if ($currentRedditUa) { $currentRedditUa } else { '(none)' })"
+$redditId = Read-Text -Prompt "Reddit client id (Enter skips OAuth)" -Default $currentRedditId
+$redditSecret = Read-Secret -Prompt "Reddit client secret" -Default $currentRedditSecret
+$redditUa = Read-Text -Prompt "Reddit User-Agent" -Default $(if ($currentRedditUa) { $currentRedditUa } else { "MarketPulseAI/1.0 (by /u/yourname)" })
 Set-EnvValue -Path $backendEnv -Key "REDDIT_USER_AGENT" -Value $redditUa
-Write-Ok "Reddit User-Agent: $redditUa"
+if ($redditId -and $redditSecret) {
+    Set-EnvValue -Path $backendEnv -Key "REDDIT_CLIENT_ID" -Value $redditId
+    Set-EnvValue -Path $backendEnv -Key "REDDIT_CLIENT_SECRET" -Value $redditSecret
+    Write-Ok "Reddit OAuth configured ($(Mask $redditId)), user agent: $redditUa"
+} else {
+    Write-Note "Reddit without OAuth: only a best-effort fallback remains. User agent: $redditUa"
+}
 
 # --------------------------------------------------------------------------- #
 # 5. Frontend environment
