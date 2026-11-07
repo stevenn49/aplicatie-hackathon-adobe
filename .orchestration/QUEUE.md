@@ -8,25 +8,19 @@ Spec paths are under `.orchestration/specs/`. "User decisions" names the binding
 
 ## RUNNING
 
-**2026-11-07 17:45 — three Opus agents in flight, deadline 19:30.**
+**Nothing is running. 2026-11-07 18:42 — PR #5 merged, `main` is `edf610f`, the checkout is in sync (`0 0`).**
 
-| Agent | Branch / output | Scope | State |
-| --- | --- | --- | --- |
-| **E2E fixer** | `fix/e2e-findings` | Tests every page in Camoufox and repairs what is broken. Must keep the gate green. **Scope addition 18:05, user's own words ("e cel mai important ca nu adauga sau cauta produse cum ar trebui"): build queue item 1 inside this branch — the four missing calls in `src/services/api.js`, the Add / Import-from-eMAG / Edit / Delete UI in `ProductAnalysis.jsx`, `launch` added to `ProductBase` and `ProductUpdate`, and the duplicate-SKU 500 → 409. This outranks the remaining repairs.** | running |
-| **Spec 004** | `.orchestration/specs/004-ai-strategist-chatbot.md` | Read-only investigation of the AI Marketing Strategist expansion | running |
-| **Spec 005** | `.orchestration/specs/005-intelligence-modules.md` | Read-only investigation of the 10 intelligence modules | running |
-
-What the user owes: nothing right now. What is next: read the three reports, verify the claims, flip the rows.
+All three agents finished. The E2E fixer delivered and its work is merged. Both investigations are written and decided.
 
 ---
 
 ## QUEUED (in order)
 
-**The user answered `all rec` at 2026-11-07 17:51.** Both specs carry a binding `USER DECISIONS` block. The order below follows those decisions.
+**The user answered `all rec` at 2026-11-07 17:51.** Both specs carry a binding `USER DECISIONS` block. The order below follows those decisions. **Item 1 shipped in #5 (1.10.0) and has been removed from this table.**
 
 | # | Item | Version / note | Spec + user decisions | What it does and why |
 |---|---|---|---|---|
-| 1 | **Product CRUD in the UI + the two product bugs** | MINOR, T1 | `005` + USER DECISIONS 17:51 (Q1, Q4) | The backend already has POST / PUT / DELETE and `import-from-emag`; `src/services/api.js` exposes none of them and `ProductAnalysis.jsx` has no control. Also: `launch` cannot be created or edited (`schemas/product.py:8-21` omits it while `schemas/dto.py:34` returns it), and a duplicate SKU raises an unhandled `IntegrityError` → 500 instead of 409. **This is the single biggest gap the investigation found.** |
+| 2 | **Review Mining / ABSA** | MINOR, T2 | `005` + USER DECISIONS (Q1) | The aspect table already exists (`sentiment_analysis.py:44-122`, `analytics_service.py:141-167`). Add the reasons extracted from review text and exact mention counts. Zero new data needed. |
 | 2 | **Review Mining / ABSA** | MINOR, T2 | `005` + USER DECISIONS (Q1) | The aspect table already exists (`sentiment_analysis.py:44-122`, `analytics_service.py:141-167`). Add the reasons extracted from review text and exact mention counts. Zero new data needed. |
 | 3 | **Brand Health Monitor** | MINOR, T2 | `005` + USER DECISIONS (Q1) | Sentiment, SOV, mentions, themes, competitor comparison. Missing: per-brand sentiment trend and the explicit "only the sources we monitor" warning. |
 | 4 | **Price Intelligence** | MINOR, T2 | `005` + USER DECISIONS (Q1, Q7) | History, fluctuations, percentage differences, price vs rating. Rule-based anomaly detection only (4 points per product, one retailer). Add the `retailer` column now, populate eMAG only, label "1 retailer monitored". |
@@ -59,6 +53,7 @@ What the user owes: nothing right now. What is next: read the three reports, ver
 | 1.9.1 | `764bd88` | **Assistant grounded in live MySQL** | `002` | `load_market_data()` builds the context from the running API (`/analytics/overview`, `/brands`, `/products`, `/consumer-segments`, `/sentiment`, `/competitors`) and caches it 2 minutes; `market_data.json` only as a fallback, marked `source: "snapshot"`. **Why:** the assistant answered "Samsung 79, average 82.6" from the stale snapshot; MySQL says 82.9 and 76.1. PROOF: `load_market_data(force=True)` → `source=live`; live chat now answers 82.9 / 76.1. |
 
 | 1.9.2 | `c3d3894` | **Three defects the spec investigation found** | `004` | `advisor.py:451` read `data["exampleRecommendations"][0]`, a key that exists only in the bundled snapshot; once the assistant moved to live data the endpoint raised KeyError and returned **500**. `scripts/start.ps1` and `start.sh` started `main:app` and Vite but **not** `backend/server.py`, so a clean `run.ps1` produced a dashboard whose Ask AI panel was dead. `specs/README.md` listed two specs that were never written. PROOF: endpoint 500 → 5 items; both launchers now read `VITE_AI_API_URL`, start the assistant, wait for `/health`, and stop it on exit; gate 70 pytest / build exit 0. |
+| 1.10.0 | **#5** `edf610f` | **[1] Product CRUD in the UI + the E2E sweep** | `005` + USER DECISIONS 17:51 (Q1, Q4) | `request()` gained `method`/`body` (byte-identical when unset; a 204 still returns `null` without reading JSON); added `createProduct`, `updateProduct`, `deleteProduct`, `importProductFromEmag`; `ProductAnalysis.jsx` gained an Add-product drawer with validation, an Import-from-eMAG bar that shows the 503 detail verbatim, and Edit/Delete in the product drawer behind a confirmation. Six defects fixed with it: `launch` missing from `ProductBase`/`ProductUpdate`; duplicate SKU **500 → 409**; **eMAG import 500 for any title over 150 chars** (`ProductResponse` re-applied the input length rule at serialisation, after the INSERT had committed — hence the duplicate rows); 11 charts invisible to the assistant and missing their "Analyse" button; Consumer Insights calling a sentiment score "Influence score"; `advisor.py:451` KeyError on live data; both launchers leaving the assistant dead. Both version strings were stale (1.0.0 / 1.1.0) and are now **1.10.0**. PROOF: CRUD exercised live on 8010 — 201 with `launch`, 409 on the duplicate, 200 on update, 204 on delete, catalogue back to 10; one live eMAG import 201 (a real 6,299.99 RON MacBook Air) then deleted; gate **70 pytest / 32 Playwright / build exit 0**, run by the orchestrator on the final commit. |
 
 **Investigations finished (no release):** `001-audit-and-integration.md` — the full audit, all nine questions answered. `004-ai-strategist-chatbot.md` and `005-intelligence-modules.md` — both written by read-only Opus investigators, both carry a binding `USER DECISIONS` block from 2026-11-07 17:51 (`all rec`).
 
@@ -66,7 +61,15 @@ What the user owes: nothing right now. What is next: read the three reports, ver
 
 ## HELD — waits until the user says go
 
-- **Push of the E2E fixer's branch** — it commits to `fix/e2e-findings` and does not push. Merging needs the gate re-run and the user's go.
 - **Removing `node_modules/` from git history** — 89.8 MB committed; destructive, needs its own go.
 - **Ollama / Groq / Gemini** — implemented, never exercised against a real provider.
-- **Reddit OAuth** and **X credits** — see QUEUED items 4 and 5.
+- **Reddit OAuth** and **X credits** — see QUEUED items 14 and 15.
+
+## KNOWN DEFECTS FOUND BUT NOT FIXED (from the E2E fixer's report, 18:35 — re-verify before citing)
+
+| # | Defect | Evidence | Where it would be fixed |
+|---|---|---|---|
+| D1 | **"Stop generating" in the assistant does not stop generation.** | Instrumented: the DOM click reaches the button, but `AbortController.prototype.abort` is never called (`window.__aborts === 0`). The agent could not separate this from a tab that had already crashed with `out of memory`, so the cause is unconfirmed. | Needs a reproduction on a fresh page first. |
+| D2 | **`out of memory` in the console after long assistant answers.** | Suspected O(n²): `AssistantChat.jsx:34-70` re-parses the whole accumulated text on every chunk. Not confirmed. | Same slice as D1. |
+| D3 | **`POST /ai/advice` has no caller anywhere in `src/`.** | Dead code. | Delete or wire it — a decision, not a fix. |
+| D4 | **Untested surfaces:** dark/light theme by hand, responsive at 375×812, the brand selectors on Brand Intelligence. | The Playwright suite covers the theme toggle, the global filters and all routes (32 green), but not these by hand. | The next E2E pass. |
