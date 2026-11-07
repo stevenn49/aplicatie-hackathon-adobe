@@ -1232,10 +1232,6 @@ Invest in collection before analytics: daily price snapshots, multiple retailers
 
 ---
 
-## USER DECISIONS (<yyyy-mm-dd hh:mm>, binding)
-
-_Appended by the orchestrator only, after the user answers. Not written by the investigator._
-
 ## USER DECISIONS (2026-11-07 17:51, binding)
 
 Utilizatorul a răspuns: **„all rec"** — acceptă toate cele 10 recomandări din acest spec.
