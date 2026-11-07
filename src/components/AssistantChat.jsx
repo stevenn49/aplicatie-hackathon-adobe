@@ -71,6 +71,28 @@ const Markdown = memo(function Markdown({ text }) {
   return <div className="chat-markdown">{blocks}</div>;
 });
 
+/**
+ * While an answer is still arriving, only the blocks that are already complete
+ * are parsed as Markdown; the unfinished tail is rendered as plain text.
+ *
+ * The completed prefix is a stable string between block boundaries, so the
+ * memoised Markdown above skips re-parsing it on most chunks. Without this,
+ * every chunk re-parsed the entire answer from scratch and the tab ran out of
+ * memory on long replies.
+ */
+const StreamingMarkdown = memo(function StreamingMarkdown({ text, streaming }) {
+  if (!streaming) return <Markdown text={text} />;
+  const cut = text.lastIndexOf("\n\n");
+  const stable = cut > 0 ? text.slice(0, cut) : "";
+  const tail = cut > 0 ? text.slice(cut + 2) : text;
+  return (
+    <>
+      {stable && <Markdown text={stable} />}
+      {tail && <div className="chat-markdown"><p>{tail}<span className="chat-caret" aria-hidden="true" /></p></div>}
+    </>
+  );
+});
+
 // ---------------------------------------------------------------- chat panel
 export default function AssistantChat({ pageTitle, pagePath }) {
   const { open, setOpen, request } = useChat();
@@ -166,7 +188,7 @@ export default function AssistantChat({ pageTitle, pagePath }) {
         {messages.map((m, idx) => <div key={idx} className={`chat-msg ${m.role} ${m.error ? "error" : ""}`}>
           {m.role === "user" ? <><p>{m.content}</p>{m.chart && <small className="chat-chart-tag"><BarChart3 size={11} /> {m.chart}</small>}</>
             : m.pending ? <div className="chat-typing" aria-label="Thinking"><i /><i /><i /></div>
-            : <>{m.intent && <span className="chat-intent">{INTENT_LABELS[m.intent] || m.intent}{m.model ? ` · ${m.model}` : ""}</span>}{m.error ? <p>{m.content}</p> : <Markdown text={m.content} />}{m.stopped && <small className="chat-stopped">Stopped</small>}</>}
+            : <>{m.intent && <span className="chat-intent">{INTENT_LABELS[m.intent] || m.intent}{m.model ? ` · ${m.model}` : ""}</span>}{m.error ? <p>{m.content}</p> : <StreamingMarkdown text={m.content} streaming={idx === messages.length - 1 && busy && !m.stopped} />}{m.stopped && <small className="chat-stopped">Stopped</small>}</>}
         </div>)}
       </div>
       <form className="assistant-input" onSubmit={onSubmit}>
