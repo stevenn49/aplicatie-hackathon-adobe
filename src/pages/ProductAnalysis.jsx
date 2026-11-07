@@ -1,13 +1,159 @@
 import { useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, Cell, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, Minus, Plus, Search, X } from "lucide-react";
-import { getProductComparison, getProductDetail, getProducts } from "../services/api.js";
+import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, Download, Minus, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  createProduct,
+  deleteProduct,
+  getProductComparison,
+  getProductDetail,
+  getProducts,
+  importProductFromEmag,
+  updateProduct,
+} from "../services/api.js";
 import { useFetch } from "../hooks/useFetch.js";
 import { useFilters } from "../context/AppContext.jsx";
 import { ChartData } from "../context/ChatContext.jsx";
 import { BrandTag, ChartCard, DataTable, EmptyState, ErrorState, PageHeading, PageLoading, SentimentBadge } from "../components/common.jsx";
 import { ChartTooltip, ResponsiveChart, axisProps, chartMargin, gridProps } from "../components/charts.jsx";
 import { formatMoney, formatNumber } from "../constants/brands.js";
+
+const EMPTY_FORM = {
+  name: "", brand: "", category: "Smartphone", price: "", currency: "RON",
+  source: "Manual", source_url: "", sku: "", launch: "", specs: "",
+};
+
+// Mirrors the backend's ProductBase rules (name 2-150, price > 0) so the user
+// sees the problem before the request, and the API stays the final authority.
+function validate(form) {
+  const errors = {};
+  const name = form.name.trim();
+  if (name.length < 2 || name.length > 150) errors.name = "Name must be 2 to 150 characters.";
+  if (!form.brand.trim()) errors.brand = "Brand is required.";
+  if (!form.category.trim()) errors.category = "Category is required.";
+  const price = Number(form.price);
+  if (!Number.isFinite(price) || price <= 0) errors.price = "Price must be greater than 0.";
+  if (form.specs.trim()) {
+    try {
+      const parsed = JSON.parse(form.specs);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) errors.specs = "Specs must be a JSON object.";
+    } catch {
+      errors.specs = "Specs must be valid JSON.";
+    }
+  }
+  return errors;
+}
+
+function ProductForm({ product, onClose, onSaved }) {
+  const [form, setForm] = useState(() => (product ? {
+    name: product.name || "", brand: product.brand || "", category: product.category || "",
+    price: String(product.price ?? ""), currency: product.currency || "RON",
+    source: product.source || "", source_url: product.source_url || "", sku: product.sku || "",
+    launch: product.launch || "",
+    specs: product.specs && Object.keys(product.specs).length ? JSON.stringify(product.specs, null, 2) : "",
+  } : EMPTY_FORM));
+  const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
+
+  const submit = async (event) => {
+    event.preventDefault();
+    const found = validate(form);
+    setErrors(found);
+    if (Object.keys(found).length) return;
+
+    const payload = {
+      name: form.name.trim(),
+      brand: form.brand.trim(),
+      category: form.category.trim(),
+      price: Number(form.price),
+      currency: form.currency.trim() || "RON",
+      source: form.source.trim() || null,
+      source_url: form.source_url.trim() || null,
+      sku: form.sku.trim() || null,
+      launch: form.launch.trim() || null,
+      specs: form.specs.trim() ? JSON.parse(form.specs) : null,
+    };
+
+    setSaving(true);
+    setSubmitError("");
+    try {
+      if (product) await updateProduct(product.id, payload);
+      else await createProduct(payload);
+      onSaved();
+    } catch (error) {
+      setSubmitError(error.message || "The product could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <aside className="product-drawer" role="dialog" aria-modal="true" aria-label={product ? "Edit product" : "Add product"}>
+        <div className="drawer-header">
+          <div>
+            <span className="eyebrow">{product ? "EDIT PRODUCT" : "NEW PRODUCT"}</span>
+            <button aria-label="Close form" className="drawer-close icon-button" onClick={onClose}><X size={19} /></button>
+          </div>
+          <h2>{product ? product.name : "Add a product"}</h2>
+        </div>
+
+        <form className="product-form" onSubmit={submit} noValidate>
+          <label><span>Name</span>
+            <input value={form.name} onChange={set("name")} aria-invalid={!!errors.name} />
+            {errors.name && <small className="form-error">{errors.name}</small>}
+          </label>
+          <div className="form-row">
+            <label><span>Brand</span>
+              <input value={form.brand} onChange={set("brand")} aria-invalid={!!errors.brand} />
+              {errors.brand && <small className="form-error">{errors.brand}</small>}
+            </label>
+            <label><span>Category</span>
+              <input value={form.category} onChange={set("category")} aria-invalid={!!errors.category} />
+              {errors.category && <small className="form-error">{errors.category}</small>}
+            </label>
+          </div>
+          <div className="form-row">
+            <label><span>Price</span>
+              <input type="number" min="0" step="0.01" value={form.price} onChange={set("price")} aria-invalid={!!errors.price} />
+              {errors.price && <small className="form-error">{errors.price}</small>}
+            </label>
+            <label><span>Currency</span>
+              <input value={form.currency} onChange={set("currency")} />
+            </label>
+          </div>
+          <div className="form-row">
+            <label><span>Source</span>
+              <input value={form.source} onChange={set("source")} placeholder="Manual, eMAG…" />
+            </label>
+            <label><span>SKU</span>
+              <input value={form.sku} onChange={set("sku")} placeholder="Optional" />
+            </label>
+          </div>
+          <label><span>Source URL</span>
+            <input value={form.source_url} onChange={set("source_url")} placeholder="https://…" />
+          </label>
+          <label><span>Launch</span>
+            <input value={form.launch} onChange={set("launch")} placeholder="e.g. Sep 2024" />
+          </label>
+          <label><span>Specs (JSON, optional)</span>
+            <textarea rows={5} value={form.specs} onChange={set("specs")} placeholder='{"Display": "6.8&quot; AMOLED"}' aria-invalid={!!errors.specs} />
+            {errors.specs && <small className="form-error">{errors.specs}</small>}
+          </label>
+
+          {submitError && <p className="form-error" role="alert">{submitError}</p>}
+
+          <div className="form-actions">
+            <button type="button" className="button button-quiet" onClick={onClose}>Cancel</button>
+            <button type="submit" className="button button-primary" disabled={saving}>{saving ? "Saving…" : product ? "Save changes" : "Create product"}</button>
+          </div>
+        </form>
+      </aside>
+    </div>
+  );
+}
 
 export default function ProductAnalysis() {
   const { filters } = useFilters();
@@ -17,10 +163,18 @@ export default function ProductAnalysis() {
   const [selectedId, setSelectedId] = useState(null);
   const [compareIds, setCompareIds] = useState([]);
   const [tableQuery, setTableQuery] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [importQuery, setImportQuery] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importNotice, setImportNotice] = useState("");
+  const [deleteError, setDeleteError] = useState("");
 
   const listState = useFetch(
     () => getProducts({ ...filters, query: `${filters.query} ${tableQuery}`.trim() }),
-    [filters.brand, filters.query, tableQuery],
+    [filters.brand, filters.query, tableQuery, reloadKey],
   );
   const detailState = useFetch(() => (selectedId ? getProductDetail(selectedId) : Promise.resolve(null)), [selectedId]);
   const compareState = useFetch(() => getProductComparison(compareIds), [compareIds.join(",")]);
@@ -62,6 +216,43 @@ export default function ProductAnalysis() {
     setCompareIds((current) =>
       current.includes(id) ? current.filter((value) => value !== id) : current.length < 4 ? [...current, id] : current,
     );
+
+  const refreshList = () => setReloadKey((key) => key + 1);
+  const openCreate = () => { setEditing(null); setFormOpen(true); };
+  const openEdit = (product) => { setEditing(product); setFormOpen(true); };
+
+  const runImport = async (event) => {
+    event.preventDefault();
+    const term = importQuery.trim();
+    if (term.length < 2 || importing) return;
+    setImporting(true);
+    setImportError("");
+    setImportNotice("");
+    try {
+      const created = await importProductFromEmag(term, null);
+      setImportNotice(`Imported "${created.name}" from eMAG.`);
+      setImportQuery("");
+      refreshList();
+    } catch (error) {
+      // The backend's 503 detail explains why eMAG could not be reached; show it verbatim.
+      setImportError(error.message || "The import failed.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const removeProduct = async (product) => {
+    if (!window.confirm(`Delete "${product.name}"? Its reviews and price history are removed too.`)) return;
+    setDeleteError("");
+    try {
+      await deleteProduct(product.id);
+      setSelectedId(null);
+      setCompareIds((current) => current.filter((id) => id !== product.id));
+      refreshList();
+    } catch (error) {
+      setDeleteError(error.message || "The product could not be deleted.");
+    }
+  };
 
   const columns = [
     {
@@ -129,10 +320,31 @@ export default function ProductAnalysis() {
         eyebrow="PRODUCT INTELLIGENCE"
         title="Product analysis"
         description="Find the signal in every spec, review, and price move."
-        action={<span className="count-pill">{listState.data.length} products tracked</span>}
+        action={
+          <div className="page-heading-actions">
+            <span className="count-pill">{listState.data.length} products tracked</span>
+            <button className="button button-primary" onClick={openCreate}><Plus size={14} /> Add product</button>
+          </div>
+        }
       />
 
       <section className="panel product-table-panel">
+        <form className="product-import-bar" onSubmit={runImport}>
+          <div className="table-search">
+            <Download size={15} />
+            <input
+              placeholder="Import a product from eMAG…"
+              aria-label="Search eMAG to import a product"
+              value={importQuery}
+              onChange={(event) => setImportQuery(event.target.value)}
+            />
+          </div>
+          <button className="button button-quiet" type="submit" disabled={importing || importQuery.trim().length < 2}>
+            {importing ? "Searching eMAG…" : "Import from eMAG"}
+          </button>
+          {importError && <span className="form-error" role="alert">{importError}</span>}
+          {importNotice && <span className="form-notice" role="status">{importNotice}</span>}
+        </form>
         <div className="table-toolbar">
           <div className="table-search">
             <Search size={15} />
@@ -336,17 +548,31 @@ export default function ProductAnalysis() {
                         </div>
                       </div>
 
-                      <button
-                        className="button button-primary drawer-compare"
-                        onClick={() => { toggleCompare(detail.product.id); setSelectedId(null); }}
-                      >
-                        {compareIds.includes(detail.product.id) ? "Remove from comparison" : "Add to comparison"}
-                      </button>
+                      {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
+
+                      <div className="drawer-actions">
+                        <button
+                          className="button button-primary drawer-compare"
+                          onClick={() => { toggleCompare(detail.product.id); setSelectedId(null); }}
+                        >
+                          {compareIds.includes(detail.product.id) ? "Remove from comparison" : "Add to comparison"}
+                        </button>
+                        <button className="button button-quiet" onClick={() => openEdit(detail.product)}><Pencil size={13} /> Edit</button>
+                        <button className="button button-quiet danger" onClick={() => removeProduct(detail.product)}><Trash2 size={13} /> Delete</button>
+                      </div>
                     </>
                   ) : null}
             </div>
           </aside>
         </div>
+      )}
+
+      {formOpen && (
+        <ProductForm
+          product={editing}
+          onClose={() => { setFormOpen(false); setEditing(null); }}
+          onSaved={() => { setFormOpen(false); setEditing(null); refreshList(); }}
+        />
       )}
     </div>
   );
