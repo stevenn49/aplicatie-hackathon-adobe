@@ -1,5 +1,6 @@
 import { Scatter, ScatterChart, CartesianGrid, XAxis, YAxis, ZAxis, Tooltip, Bar, BarChart, Cell } from "recharts";
 import { ArrowUpRight, ChevronRight, Swords } from "lucide-react";
+import { Link } from "react-router-dom";
 import { getCompetitors, getProducts } from "../services/api.js";
 import { useFetch } from "../hooks/useFetch.js";
 import { useFilters } from "../context/AppContext.jsx";
@@ -159,7 +160,16 @@ export default function CompetitorAnalysis() {
                 <span className="activity-date">{item.date}</span>
                 <span className="activity-brand"><BrandTag brand={item.brand} color={visibleBrands.find((b) => b.name === item.brand)?.color} compact /><small>{item.type}</small></span>
                 <div className="activity-copy"><strong>{item.title}</strong><p>{item.detail}</p></div>
-                <button aria-label={`Read ${item.title}`} className="icon-button"><ChevronRight size={16} /></button>
+                {/* This used to be a <button> with no handler: it looked like a
+                    "read more" control and did nothing. It now opens the brand's
+                    page, focused on that brand. */}
+                <Link
+                  to={`/brands?brand=${encodeURIComponent(item.brand)}`}
+                  aria-label={`Open ${item.brand} in Brand Intelligence`}
+                  className="icon-button"
+                >
+                  <ChevronRight size={16} />
+                </Link>
               </article>
             ))}
           </div>

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
 import { ArrowDownRight, ArrowUpRight, ChevronDown, Plus, TrendingUp } from "lucide-react";
 import { getBrandStats, getMarketOverview } from "../services/api.js";
@@ -9,8 +10,16 @@ import { ResponsiveChart, axisProps, chartMargin, gridProps } from "../component
 
 export default function BrandIntelligence() {
   const { filters } = useFilters();
+  const [searchParams] = useSearchParams();
   const [selectedBrands, setSelectedBrands] = useState([]);
-  const [focusBrand, setFocusBrand] = useState(null);
+  // `?brand=Apple` lets another page deep-link to one brand (the competitor
+  // activity list links here). Without the param the page behaves as before.
+  const [focusBrand, setFocusBrand] = useState(() => searchParams.get("brand"));
+
+  useEffect(() => {
+    const requested = searchParams.get("brand");
+    if (requested) setFocusBrand(requested);
+  }, [searchParams]);
 
   const statsState = useFetch(() => getBrandStats(filters), [filters.brand]);
   const overviewState = useFetch(() => getMarketOverview(filters), [filters.brand]);
@@ -105,7 +114,7 @@ export default function BrandIntelligence() {
       <div className="brand-chart-grid">
         <ChartCard
           title="Conversation volume over time"
-          subtitle={visibleBrands.length ? `Indexed mentions for ${visibleBrands.join(" and ")}` : `Indexed mentions for ${activeBrand?.brand}`}
+          subtitle={`Indexed mentions for ${[activeBrand?.brand, ...visibleBrands.filter((brand) => brand !== activeBrand?.brand)].filter(Boolean).join(" and ")}`}
           data={evolutionSeries}
           className="brand-sentiment-chart"
         >
@@ -116,9 +125,9 @@ export default function BrandIntelligence() {
                 <XAxis dataKey="month" {...axisProps} />
                 <YAxis {...axisProps} domain={[0, 100]} />
                 <Tooltip />
-                <Line type="monotone" dataKey={activeBrand?.brand} name={activeBrand?.brand} stroke={colorFor(activeBrand?.brand)} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} connectNulls />
+                <Line type="linear" dataKey={activeBrand?.brand} name={activeBrand?.brand} stroke={colorFor(activeBrand?.brand)} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
                 {visibleBrands.filter((brand) => brand !== activeBrand?.brand).map((brand) => (
-                  <Line key={brand} type="monotone" dataKey={brand} stroke={colorFor(brand)} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls />
+                  <Line key={brand} type="linear" dataKey={brand} stroke={colorFor(brand)} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
                 ))}
               </LineChart>
             </ResponsiveChart>
