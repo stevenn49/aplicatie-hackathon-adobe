@@ -16,6 +16,8 @@ One file per investigation or unit of work, named `NNN-slug.md`. Structure follo
 - `## USER DECISIONS (<yyyy-mm-dd hh:mm>, binding)` — appended by the orchestrator only, after the user answers.
 
 Current specs:
-- `001-audit-and-integration.md` — the full audit and the integration plan.
-- `002-llm-openrouter.md` — OpenRouter LLM integration (pending the user's key and model id).
-- `003-testing.md` — pytest + Playwright + Camoufox end-to-end proof.
+- `001-audit-and-integration.md` — the full audit and the integration plan. Delivered in versions 1.1.0–1.7.0.
+- `004-ai-strategist-chatbot.md` — the AI Marketing Strategist expansion: what exists, the gap, three delivery slices, ten numbered questions.
+- `005-intelligence-modules.md` — the ten intelligence modules measured against the real data, with ten numbered questions.
+
+Specs 002 and 003 were planned but never written; the work they covered (the OpenRouter integration and the test suite) shipped as versions 1.9.0 and 1.7.0 and is recorded in `QUEUE.md` and `WORKING-NOTES.md` PART VIII instead.

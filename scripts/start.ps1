@@ -138,6 +138,61 @@ if (Get-ProjectListener -Port $BackendPort) {
 }
 
 # ---------------------------------------------------------------------------
+# AI assistant service (backend/server.py)
+#
+# It is a separate app on its own port. Without it the "Ask AI" panel and the
+# per-chart "Analyse" buttons are dead, so the launcher starts it whenever
+# VITE_AI_API_URL is configured.
+# ---------------------------------------------------------------------------
+$assistant = $null
+$assistantUrl = ""
+$frontendEnv = Join-Path $Root ".env.local"
+if (Test-Path $frontendEnv) {
+    $line = Select-String -Path $frontendEnv -Pattern '^\s*VITE_AI_API_URL\s*=' | Select-Object -First 1
+    if ($line) {
+        $assistantUrl = ($line.Line -replace '^\s*VITE_AI_API_URL\s*=\s*', "").Trim().Trim('"')
+    }
+}
+
+if ($assistantUrl) {
+    $assistantPort = 0
+    if ($assistantUrl -match ':(\d+)') { $assistantPort = [int]$Matches[1] }
+
+    if ($assistantPort -gt 0) {
+        if (Get-ProjectListener -Port $assistantPort) {
+            Write-Step "AI assistant already running on $assistantPort"
+            Write-Ok "Leaving it alone"
+        } else {
+            Write-Step "Starting the AI assistant on $assistantPort"
+            $assistantOut = Join-Path $env:TEMP "marketpulse-assistant.log"
+            $assistantErr = Join-Path $env:TEMP "marketpulse-assistant.err.log"
+            $assistant = Start-Process -FilePath "python" `
+                -ArgumentList "-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "$assistantPort" `
+                -WorkingDirectory (Join-Path $Root "backend") `
+                -RedirectStandardOutput $assistantOut -RedirectStandardError $assistantErr `
+                -PassThru -WindowStyle Hidden
+
+            $assistantReady = $false
+            for ($i = 0; $i -lt 30; $i++) {
+                try {
+                    $assistantHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$assistantPort/health" -TimeoutSec 2
+                    $assistantReady = $true
+                    break
+                } catch { Start-Sleep -Seconds 2 }
+            }
+            if ($assistantReady) {
+                Write-Ok "Assistant healthy: provider=$($assistantHealth.provider), key=$($assistantHealth.key_configured)"
+            } else {
+                Write-Warn "The assistant did not start. The dashboard works; the Ask AI panel will not."
+                Get-Content $assistantErr -Tail 10 -ErrorAction SilentlyContinue
+            }
+        }
+    }
+} else {
+    Write-Note "VITE_AI_API_URL is empty; the assistant is disabled."
+}
+
+# ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
 $viteOut = Join-Path $env:TEMP "marketpulse-frontend.log"
@@ -199,6 +254,7 @@ if ($Detach) {
 $watched = @()
 if ($backend) { $watched += $backend.Id }
 if ($frontend) { $watched += $frontend.Id }
+if ($assistant) { $watched += $assistant.Id }
 
 if ($watched.Count -eq 0) {
     Write-Host "Both components were already running; nothing to wait for." -ForegroundColor Yellow

@@ -122,6 +122,49 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# AI assistant (backend/server.py)
+#
+# A separate app on its own port. Without it the "Ask AI" panel and the
+# per-chart "Analyse" buttons are dead, so it starts whenever VITE_AI_API_URL
+# is configured.
+# ---------------------------------------------------------------------------
+ASSISTANT_PID=""
+ASSISTANT_LOG="${TMPDIR:-/tmp}/marketpulse-assistant.log"
+ASSISTANT_URL=""
+if [[ -f .env.local ]]; then
+  ASSISTANT_URL="$(grep -E '^\s*VITE_AI_API_URL\s*=' .env.local | head -1 | sed -E 's/^\s*VITE_AI_API_URL\s*=\s*//' | tr -d '"' || true)"
+fi
+
+if [[ -n "$ASSISTANT_URL" ]]; then
+  ASSISTANT_PORT="$(echo "$ASSISTANT_URL" | sed -E 's/.*:([0-9]+).*/\1/')"
+  if [[ "$(port_open "$ASSISTANT_PORT")" == "yes" ]]; then
+    step "AI assistant already running on $ASSISTANT_PORT"
+    ok "Leaving it alone"
+  else
+    step "Starting the AI assistant on $ASSISTANT_PORT"
+    (
+      cd backend
+      exec python3 -m uvicorn server:app --host 127.0.0.1 --port "$ASSISTANT_PORT"
+    ) >"$ASSISTANT_LOG" 2>&1 &
+    ASSISTANT_PID=$!
+
+    assistant_ready=0
+    for _ in $(seq 1 30); do
+      if curl -fsS "http://127.0.0.1:$ASSISTANT_PORT/health" >/dev/null 2>&1; then assistant_ready=1; break; fi
+      sleep 2
+    done
+    if [[ "$assistant_ready" -eq 1 ]]; then
+      ok "Assistant healthy: $(curl -fsS "http://127.0.0.1:$ASSISTANT_PORT/health")"
+    else
+      warn "The assistant did not start. The dashboard works; the Ask AI panel will not."
+      tail -10 "$ASSISTANT_LOG" >&2 || true
+    fi
+  fi
+else
+  note "VITE_AI_API_URL is empty; the assistant is disabled."
+fi
+
+# ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
 FRONTEND_LOG="${TMPDIR:-/tmp}/marketpulse-frontend.log"
@@ -167,13 +210,14 @@ cleanup() {
   printf '\nStopping the processes this script started...\n'
   [[ -n "$BACKEND_PID" ]] && kill "$BACKEND_PID" 2>/dev/null || true
   [[ -n "$FRONTEND_PID" ]] && kill "$FRONTEND_PID" 2>/dev/null || true
+  [[ -n "$ASSISTANT_PID" ]] && kill "$ASSISTANT_PID" 2>/dev/null || true
   wait 2>/dev/null || true
   printf 'Stopped. The database container is left running.\n'
 }
 trap cleanup EXIT INT TERM
 
-if [[ -z "$BACKEND_PID" && -z "$FRONTEND_PID" ]]; then
-  printf 'Both components were already running; nothing to wait for.\n'
+if [[ -z "$BACKEND_PID" && -z "$FRONTEND_PID" && -z "$ASSISTANT_PID" ]]; then
+  printf 'Every component was already running; nothing to wait for.\n'
   trap - EXIT INT TERM
   exit 0
 fi
