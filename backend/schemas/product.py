@@ -15,6 +15,7 @@ class ProductBase(BaseModel):
     source_url: Optional[str] = Field(default=None, description="Direct URL to product page")
     sku: Optional[str] = Field(default=None, description="Stock keeping unit or model code")
     specs: Optional[Dict[str, Any]] = Field(default=None, description="Technical specifications")
+    launch: Optional[str] = Field(default=None, description="Release label shown in the UI, e.g. 'Sep 2024'")
 
 
 class ProductCreate(ProductBase):
@@ -31,6 +32,7 @@ class ProductUpdate(BaseModel):
     source_url: Optional[str] = None
     sku: Optional[str] = None
     specs: Optional[Dict[str, Any]] = None
+    launch: Optional[str] = None
 
 
 class ProductResponse(ProductBase):
