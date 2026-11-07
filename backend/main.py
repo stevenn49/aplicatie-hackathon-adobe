@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     description="Market Intelligence API for technology products, consumer sentiment, price evolution, and trends.",
-    version="1.1.0",
+    version="1.10.0",
     lifespan=lifespan
 )
 
