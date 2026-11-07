@@ -1,10 +1,13 @@
 """
 Unit tests for the derivation layer and the connectors that must not fabricate.
 """
+import json
+
 import pytest
 
 from services.analytics_service import AnalyticsService, brand_color
 from services.forecasting import PriceForecastingService
+from services.review_mining import ReviewMiningService
 from services.sentiment_analysis import SentimentAnalysisService
 
 
@@ -15,6 +18,14 @@ class FakeReview:
         self.sentiment_label = label
         self.sentiment_score = score
         self.aspects = aspects or {}
+        self.content = content
+
+
+class MiningReview:
+    """Minimal stand-in for a stored Review as the mining service sees it."""
+
+    def __init__(self, review_id, content):
+        self.id = review_id
         self.content = content
 
 
@@ -123,6 +134,156 @@ def test_brand_color_is_stable_and_known():
     # Unknown brands get a deterministic colour from the hash.
     assert brand_color("Acme") == brand_color("Acme")
     assert brand_color("Acme").startswith("#")
+
+
+# --------------------------------------------------------------------------- #
+# Review mining (ABSA)
+# --------------------------------------------------------------------------- #
+
+def _aspect(payload, label):
+    return next(item for item in payload["aspects"] if item["aspect"] == label)
+
+
+def test_mining_returns_empty_lists_for_an_empty_corpus():
+    """No reviews means no reasons and an honest zero coverage, not a score."""
+    payload = ReviewMiningService().mine([])
+    assert payload["aspects"] == []
+    assert payload["recurring_problems"] == []
+    assert payload["recurring_praise"] == []
+    assert payload["coverage"] == {"reviews_analysed": 0, "reviews_with_reasons": 0}
+
+
+def test_mining_emits_no_reason_without_an_aspect_keyword():
+    """A review that mentions no aspect produces nothing — silence is honest."""
+    payload = ReviewMiningService().mine(
+        [MiningReview(1, "It arrived on Tuesday and the box was brown.")]
+    )
+    assert payload["aspects"] == []
+    assert payload["coverage"] == {"reviews_analysed": 1, "reviews_with_reasons": 0}
+
+
+def test_mining_phrase_is_a_verbatim_substring_of_the_review():
+    """Every returned phrase must occur in the stored text, or it is invented."""
+    content = "The battery is excellent. The price is high."
+    payload = ReviewMiningService().mine([MiningReview(1, content)])
+    phrases = [reason["phrase"] for aspect in payload["aspects"] for reason in aspect["reasons"]]
+    assert phrases
+    for phrase in phrases:
+        assert phrase in content
+
+
+def test_mining_phrase_is_verbatim_in_at_least_one_of_its_reviews():
+    """
+    A deduped group keeps the wording of one member; that wording must be a
+    real substring of that member's text, never a paraphrase.
+    """
+    reviews = [
+        MiningReview(1, "The price is high."),
+        MiningReview(2, "The price is very high."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    price = _aspect(payload, "Price & value")
+    reason = price["reasons"][0]
+    assert reason["mentions"] == 2
+    assert any(reason["phrase"] in review.content for review in reviews)
+
+
+def test_mining_mentions_always_equals_review_ids_length():
+    reviews = [
+        MiningReview(1, "The battery is excellent."),
+        MiningReview(2, "The battery is excellent."),
+        MiningReview(3, "The battery is terrible."),
+        MiningReview(4, "The camera is great and the price is high."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    assert payload["aspects"]
+    for aspect in payload["aspects"]:
+        for reason in aspect["reasons"]:
+            assert reason["mentions"] == len(reason["review_ids"])
+            assert reason["review_ids"] == sorted(set(reason["review_ids"]))
+
+
+def test_mining_dedupes_near_identical_phrases_and_counts_them():
+    """'the price is high' in three phrasings is one reason with mentions 3."""
+    reviews = [
+        MiningReview(1, "The price is high."),
+        MiningReview(2, "The price is very high."),
+        MiningReview(3, "The price is high for what it offers."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    price = _aspect(payload, "Price & value")
+    top = price["reasons"][0]
+    assert top["mentions"] == 3
+    assert top["review_ids"] == [1, 2, 3]
+    assert top["phrase"] == "The price is high"
+
+
+def test_mining_never_merges_opposite_polarity():
+    reviews = [
+        MiningReview(1, "The battery is excellent."),
+        MiningReview(2, "The battery is terrible."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    battery = _aspect(payload, "Battery life")
+    polarities = {reason["polarity"] for reason in battery["reasons"]}
+    assert polarities == {"positive", "negative"}
+
+
+def test_mining_reports_neutral_when_the_text_carries_no_opinion():
+    payload = ReviewMiningService().mine([MiningReview(1, "The battery is 4000 mAh.")])
+    battery = _aspect(payload, "Battery life")
+    assert battery["reasons"][0]["polarity"] == "neutral"
+    # A neutral reason is real evidence, so it still counts as a mention.
+    assert battery["mentions"] == 1
+
+
+def test_mining_aspect_score_is_computed_from_its_reasons():
+    reviews = [
+        MiningReview(1, "The battery is excellent."),
+        MiningReview(2, "The battery is terrible."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    battery = _aspect(payload, "Battery life")
+    # one positive and one negative reason: (1 + 0) / 2 * 100
+    assert battery["score"] == 50.0
+    assert battery["polarity"] == "mixed"
+
+
+def test_mining_orders_reasons_by_mentions_then_phrase():
+    reviews = [
+        MiningReview(1, "The price is high."),
+        MiningReview(2, "The price is high."),
+        MiningReview(3, "The camera is excellent."),
+        MiningReview(4, "The camera is great."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    for aspect in payload["aspects"]:
+        keys = [(-reason["mentions"], reason["phrase"]) for reason in aspect["reasons"]]
+        assert keys == sorted(keys)
+    aspect_keys = [(-item["mentions"], item["aspect"]) for item in payload["aspects"]]
+    assert aspect_keys == sorted(aspect_keys)
+
+
+def test_mining_is_deterministic():
+    reviews = [
+        MiningReview(1, "The battery is excellent and the price is high."),
+        MiningReview(2, "The display is bright. The camera is great."),
+        MiningReview(3, "The battery drains fast."),
+    ]
+    service = ReviewMiningService()
+    first = json.dumps(service.mine(reviews), sort_keys=True)
+    second = json.dumps(service.mine(reviews), sort_keys=True)
+    assert first == second
+
+
+def test_mining_separates_problems_from_praise():
+    reviews = [
+        MiningReview(1, "The battery is excellent."),
+        MiningReview(2, "The price is high."),
+    ]
+    payload = ReviewMiningService().mine(reviews)
+    assert [item["phrase"] for item in payload["recurring_problems"]] == ["The price is high"]
+    assert [item["phrase"] for item in payload["recurring_praise"]] == ["The battery is excellent"]
 
 
 # --------------------------------------------------------------------------- #
