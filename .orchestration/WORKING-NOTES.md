@@ -23,6 +23,7 @@ The orchestrator's manual: how the user works, what they verify and reject, repo
 | VIII — Release history | one row per version |
 | IX — Learnings | one deduplicated list, grouped by theme, each with its origin |
 | X — Still open | deferred work, queue pointers, the user's own to-dos |
+| **XI — The multi-agent protocol** | how this project actually runs: roles, dispatch, file ownership, merge order, conflict avoidance |
 
 **Fastest cold start:** the newest HANDOFF → PART I → II.5 → II.6 → IV → the last ten rows of PART VIII → X.
 
@@ -268,6 +269,8 @@ Investigators disagree; the implementer measures both sides. Scope additions can
 ## VI.3 What a read-only investigator brief says
 READ-ONLY: no git writes, no edits outside its scratchpad and the spec, never touch the live system (GET-only at most), never print secrets, open data copies read-only, a stated live-call budget (or none), where to write the spec, the numbered questions to answer, CONFIRMED vs UNVERIFIED separated, "a process scan is not proof a service is unused".
 
+**See PART XI for the protocol this project actually uses** — roles, file ownership, dispatch, verification and merge order with several agents at once.
+
 ---
 
 # PART VII — ENVIRONMENT
@@ -293,6 +296,7 @@ READ-ONLY: no git writes, no edits outside its scratchpad and the spec, never to
 | 1.1.0–1.7.0 | 2026-11-07 | local | The integration arc: MySQL in Docker on 3307 with no silent fallback; the five missing endpoints; the five reshaped ones; mocks and hardcoded numbers removed; four data-integrity bugs fixed; pytest + Playwright suites. Gate: 56 pytest passed / 3 skipped, 32 Playwright passed, `npm run build` exit 0. Deviations: backend on 8010 because 8000 is taken on this machine. Not done: OpenRouter key and model id (LLM surfaces report `derived`). |
 | 1.8.0 | 2026-11-07 | #4 | One interactive launcher in the repo root (`run.ps1` / `run.sh`), a guided setup that detects Docker vs native MySQL and asks for each API key, a settings manager, and `POST /api/admin/reload` so a key applies without a restart. |
 | 1.9.0 | 2026-11-07 | #4 (merge `a988877`) | OpenRouter as an assistant provider and the default; output budget read from each model's metadata with `reasoning.effort=high`; JSON extraction takes the outermost structure; the three LLM surfaces read cache-only and generate in a background task; Reddit gains OAuth. Gate: **70 pytest passed / 3 skipped**, **32 Playwright passed**, build exit 0. Live OpenRouter calls verified on all four surfaces. |
+| 1.9.1 | 2026-11-07 | `764bd88` | The assistant now reads live MySQL through the API instead of `market_data.json`. It had been answering "Samsung 79, average 82.6" from the stale snapshot; MySQL holds 82.9 and 76.1. Verified live after a restart. |
 
 ---
 
@@ -327,13 +331,108 @@ One bullet per lesson, with the evidence that makes it memorable and its origin.
 - 2026-11-07: The X/Twitter free tier closed to new developers on 2026-02-06. Access is pay-per-use (~$0.005 per post read) and a bearer token alone returns 402 without credits. Treat X as a paid source, not a free one.
 - 2026-11-07: `Start-Process` children hold inherited console handles, so a script that starts a server and then `exit`s leaves the host waiting. `[Environment]::Exit(0)` in the detach path is what actually returns control.
 - 2026-11-07: A `$script:` variable set by the caller is not reliably visible inside functions defined in a dot-sourced file. Use `$global:` for the non-interactive flag, and guard prompts with `[Console]::IsInputRedirected` so a scripted run never blocks on `Read-Host`.
+- 2026-11-07: **A second data source is a second truth.** The assistant answered from `backend/market_data.json` (Samsung 79, average 82.6) while MySQL held 82.9 and 76.1. Every number the user saw in the chat was stale, and nothing in the UI said so. When a module reads a snapshot, the snapshot must be regenerated from the live store or deleted.
+- 2026-11-07: **Sending a message to the wrong agent costs two corrective messages.** With three agents running, the chatbot requirements went to the E2E fixer. Check the agent id against `ListAgents` before every `SendMessage`, and when it happens, say "ignore the previous two messages" explicitly rather than hoping the new brief overrides them.
+- 2026-11-07: **A restarted service is not a reloaded one.** `advisor.py` was fixed on disk but the assistant kept serving the old code until the process was restarted. After editing a service's code, restart it before believing a test of the change.
+- 2026-11-07: **Camoufox `browser_evaluate` rejects object returns.** It must return `JSON.stringify(...)`; a plain object fails with a bare "Error" and no explanation.
+
+---
+
+# PART XI — THE MULTI-AGENT PROTOCOL
+
+This project runs with more than one agent at a time. The rules below exist because the failure modes are specific and they cost real time.
+
+## XI.1 The roles
+
+| Role | Model | Writes? | Owns |
+| --- | --- | --- | --- |
+| **Orchestrator** (the main session) | the session's model | yes, but sparingly | the contract, the artifacts, the verification, the merge |
+| **Implementer** | Opus | code, on its own branch | one scope, end to end, with the gate green |
+| **Investigator / spec writer** | Opus | only its spec file | a read-only investigation and a numbered question list |
+
+At most **three** agents at once. Only **one** implementer touches code at a time; investigators may run beside it because they write nothing else.
+
+## XI.2 File ownership — the rule that prevents most conflicts
+
+**Two agents never edit the same file in the same window.** Before dispatching a second writer, list the files each will touch and check for overlap. When overlap is unavoidable, the second agent waits.
+
+Read-only investigators may read anything, but they write **only** their own `specs/NNN-*.md`.
+
+## XI.3 Dispatch protocol
+
+1. `ListAgents` before every dispatch — stray agents happen.
+2. The brief is a spec: role line → scope → what is NOT in scope → the gate → the hard rules → the deliverable format.
+3. **State the deadline in the brief** if there is one. An agent without a deadline will refactor.
+4. **Verify the agent id you are messaging.** On 2026-11-07 a full requirements document was sent to the E2E fixer instead of the spec writer; it took two corrective messages to undo. When several agents are running, send the correction immediately and name the mistake explicitly ("ignore the previous two messages").
+5. Announce every dispatch in the same message as the tool call.
+
+## XI.4 What an implementer brief must contain
+
+- The exact commands to start the services, with the ports.
+- The current gate result, so it knows what "green" means.
+- The branch it must create and that it must **not** push or open a PR.
+- "Commit often, not at the end" — a crashed agent with uncommitted work loses everything.
+- "Do not weaken the gate": if an existing test fails because of a change, fix it properly, never delete it.
+- The deliverable format: a table per page, bugs with symptom → cause → fix → proof, the exact gate output, the branch and SHAs.
+
+## XI.5 What an investigator brief must contain
+
+- READ-ONLY, stated first.
+- The one file it may write.
+- The format to follow (`.orchestration/specs/README.md`).
+- "Every claim about code carries `file:line` and was read by you."
+- "Separate CONFIRMED from UNVERIFIED."
+- "Do not promise what the data cannot support."
+- A cap on the number of questions (10), each with a recommendation.
+
+## XI.6 Verification after an agent reports
+
+Never relay an agent's report as fact. The orchestrator:
+
+1. Reads the report and lists its claims.
+2. Checks every `file:line` claim against the code.
+3. Re-runs the gate itself.
+4. Looks at the branch: `git log --oneline main..<branch>` and `git diff --stat main...<branch>`.
+5. Only then flips the queue row and tells the user.
+
+Budget half of an agent's findings to be wrong or overstated. "Could not verify" is not "does not exist".
+
+## XI.7 Merge order with several branches
+
+When more than one branch is ready:
+
+1. **Schema or contract changes first** — anything that changes `schemas/dto.py`, `database/models.py` or the frontend's `api.js` contract.
+2. **Then features**, one at a time, re-running the gate after each.
+3. **Then docs and orchestration** — they never conflict but they go last so the release history is accurate.
+
+Never merge two branches that both touch `src/services/api.js` without rebasing one onto the other first.
+
+## XI.8 The deadline rule
+
+When the user names a time, the work changes shape:
+
+- **Stop starting.** Finish what is in flight.
+- **Commit early and often.** Uncommitted work does not survive a stop.
+- **Report partial honestly.** "These five pages are verified, these three are not" beats a claim of completion.
+- **Documentation is the first thing to cut**, not the last — unless the user asked for it explicitly.
+
+## XI.9 What the orchestrator keeps current
+
+At every PR boundary and before any compaction:
+
+- `QUEUE.md` — RUNNING with the agent table, QUEUED in order, FINISHED with proofs, HELD.
+- `WORKING-NOTES.md` — a release row per version, a dated lesson per learning.
+- `HANDOFF-<date>.md` — the resume point: state, what shipped, what is running, what is verified, what is not, what the user owes.
+
+A handoff written before a compaction is the only thing that survives it. Write it for a reader who has none of this context.
 
 ---
 
 # PART X — STILL OPEN
 
 - **Amendment 2026-11-07:** `.orchestration/` **is committed** — the user asked for the tracking files to live in the repo because the team works cumulatively. Only `*.bak-*` copies stay untracked.
-- **Priority now:** the integration arc is complete and green locally. Next: commit + push, then the OpenRouter key so the LLM surfaces can be proven against the real model.
-- **Awaiting the user's decision:** the OpenRouter API key and the exact free model id; whether to remove `node_modules/` from git history.
-- **Known unqueued findings** (re-verify before citing): `node_modules/` is still committed (89.8 MB); there is no CI; `datetime.utcnow()` is deprecated in Python 3.13 and emits warnings across the models and services.
-- **The user's own to-dos:** supply the OpenRouter key and model id.
+- **Amendment 2026-11-07:** the project runs with **three agents at once** (one implementer, two investigators). The protocol is PART XI.
+- **Priority now (2026-11-07 17:45):** three Opus agents in flight — the E2E fixer on `fix/e2e-findings`, and two spec writers. Deadline 19:30.
+- **Awaiting the user's decision:** answers to the numbered questions in specs 004 and 005; whether to remove `node_modules/` from git history; Reddit OAuth credentials; whether X/Twitter is worth funding.
+- **Known unqueued findings** (re-verify before citing): `node_modules/` is still committed (89.8 MB); there is no CI; `datetime.utcnow()` is deprecated in Python 3.13 and emits warnings across the models and services; Brand Intelligence has no "Analyse" buttons on its charts while the other pages do.
+- **The user's own to-dos:** answer the spec questions so the next arc can start.

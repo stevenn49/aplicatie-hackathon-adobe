@@ -1,26 +1,34 @@
 # QUEUE.md — the PR queue (binding order since 2026-11-07)
 
-**Rule:** this file is updated at every PR start and every PR end, in full detail. Statuses: **RUNNING** · **QUEUED** · **FINISHED** (plus SPEC FIRST / NEEDS GO / HELD as sub-notes). One production PR at a time; read-only investigators may run beside it, never more than 2 agents total. Every PR: draft at code freeze → gate green on the final commit → squash-merge → verified by the orchestrator (WORKING-NOTES II.5) → row flipped to FINISHED here.
+**Rule:** this file is updated at every PR start and every PR end, in full detail. Statuses: **RUNNING** · **QUEUED** · **FINISHED** (plus SPEC FIRST / NEEDS GO / HELD as sub-notes). One production PR at a time; read-only investigators may run beside it, never more than 3 agents total. Every PR: draft at code freeze → gate green on the final commit → squash-merge → verified by the orchestrator (WORKING-NOTES II.5) → row flipped to FINISHED here.
+
 Spec paths are under `.orchestration/specs/`. "User decisions" names the binding block inside that spec (the user's answers, with time). When rows are merged (the user may group same-file, same-proof items into one PR), the merged row carries each absorbed item's original cells verbatim under its label and keeps the old item numbers in brackets so the specs still line up; frozen-file, data-rewriting, spec-first and feature items stay alone.
 
 ---
 
 ## RUNNING
 
-**2026-11-07 — integration arc, uncommitted.** Items 1-4 and 6-7 are implemented and verified locally. Nothing committed yet; the user asked for a commit and push of the code plus the tracking files. No agent dispatched — the orchestrator did the work directly because the contract had to be designed as one piece.
+**2026-11-07 17:45 — three Opus agents in flight, deadline 19:30.**
 
-_(no production PR running)_
+| Agent | Branch / output | Scope | State |
+| --- | --- | --- | --- |
+| **E2E fixer** | `fix/e2e-findings` | Tests every page in Camoufox and repairs what is broken. Must keep the gate green. | running |
+| **Spec 004** | `.orchestration/specs/004-ai-strategist-chatbot.md` | Read-only investigation of the AI Marketing Strategist expansion | running |
+| **Spec 005** | `.orchestration/specs/005-intelligence-modules.md` | Read-only investigation of the 10 intelligence modules | running |
+
+What the user owes: nothing right now. What is next: read the three reports, verify the claims, flip the rows.
 
 ---
 
 ## QUEUED (in order)
 
-_(nothing queued; see HELD for the items that need the user's go)_
-
 | # | Item | Version / note | Spec + user decisions | What it does and why |
 |---|---|---|---|---|
-| — | **Reddit OAuth in production** | — | — | The connector supports OAuth; the team still has to register an app and put the credentials in `backend/.env`. Without them Reddit contributes nothing. |
-| — | **X/Twitter credits** | — | — | The free tier closed in February 2026. Only worth doing if the team funds credits. |
+| 1 | **AI Marketing Strategist chatbot** | MINOR, T2 | `004-ai-strategist-chatbot.md` + USER DECISIONS pending | Turns the assistant into a consultant: Marketing Strategy Generator, Chart Intelligence, Consumer Intelligence, Competitor Intelligence, Campaign & Content Generator, plus six advanced features (Opportunity Detection, Predictive Insights, Automated SWOT, Persona Generator, KPI Advisor, What-if). Repositioned UI, streaming output. Questions from the agent must be answered first. |
+| 2 | **Intelligence modules** | MINOR, T2 | `005-intelligence-modules.md` + USER DECISIONS pending | Ten modules: Product Radar, Review Mining (ABSA), Competitor Benchmarking, Trend Discovery, Marketing Campaign Lab, Customer Segmentation (ML), Price Intelligence (anomaly detection), Brand Health Monitor, Market Opportunity Finder, Automated Business Reports (PDF/Excel/CSV/PPTX). Plus eight smaller features and full product CRUD in the UI. |
+| 3 | **Product CRUD in the UI** | MINOR, T1 | folded into `005` | The backend already has POST / PUT / DELETE and `import-from-emag`; the frontend has no way to use them. Add, edit, delete and import products from Product Analysis. |
+| 4 | **Reddit OAuth in production** | — | — | The connector supports OAuth; the team still has to register an app and put the credentials in `backend/.env`. Without them Reddit contributes nothing. |
+| 5 | **X/Twitter credits** | — | — | The free tier closed in February 2026. Only worth doing if the team funds credits. |
 
 ---
 
@@ -28,20 +36,23 @@ _(nothing queued; see HELD for the items that need the user's go)_
 
 | Version | PR | Item | Spec + user decisions | What shipped |
 |---|---|---|---|---|
-| 1.1.0 | (local, uncommitted) | **MySQL local database** | `001` + USER DECISIONS 2026-11-07 | SHIPPED: `docker-compose.yml` (MySQL 8.4, host 3307, healthcheck); `PyMySQL` in requirements; `database/connection.py` refuses a non-MySQL URL and has **no** silent SQLite fallback; `config.py` defaults to MySQL; `backend/.env.example` documents Docker / native / shared. PROOF: container healthy in 12 s, `SELECT VERSION()` → 8.4.11, `/health` → `database=healthy, database_backend=mysql+pymysql`. |
-| 1.2.0 | (local, uncommitted) | **Five missing endpoints** | `001` + USER DECISIONS | SHIPPED: `GET /api/analytics/brands`, `/consumer-segments`, `/competitors`, `GET /api/marketing/trends` (new router), `GET /api/products/compare`. PROOF: all return 200 with computed data — brands 5, segments 5, competitors 5 brands / 10 price rows / 6 features, marketing 12 trend points / 3 opportunities, compare 2 products. |
-| 1.3.0 | (local, uncommitted) | **Reshape the five existing endpoints** | `001` + USER DECISIONS | SHIPPED: `schemas/dto.py` (the dashboard contract), `services/analytics_service.py` (all derivations), overview → `kpis/evolution/mentions/topMovers`, sentiment → `distribution/trend/aspects/keywords/reviews` with optional filters, recommendations → `summary/items/high_priority`, products carry `sentiment/change/interest/color/launch/pros/cons`. Legacy endpoints kept under new names (`/summary`, `/product-sentiment`, `/product-recommendations`). PROOF: every endpoint 200 with non-empty derived values; sentiment distribution sums to 100. |
-| 1.4.0 | (local, uncommitted) | **Remove mocks and hardcoded numbers** | `001` + USER DECISIONS | SHIPPED: `src/mocks/marketData.js` deleted; `api.js` has no fallback and throws a named `ApiError`; every page consumes the API; all 23 hardcoded figures replaced by computed values or removed; `Layout` shows the real database status, the real recommendation count and the real LLM state. PROOF: all 8 routes render with the backend stopped → `ErrorState`; with it running → real MySQL data. |
-| 1.6.0 | (local, uncommitted) | **Data-integrity fixes** | `001` | SHIPPED: `forecasting.py` oldest/newest inversion; `prices.py` `old_price` captured before reassignment; `google_trends.py` no longer fabricates 88.0/72.0 (returns `[]`, the collector reports the gap); `emag._clean_price` handles space thousands separators and has a real `Tuple` type hint; seeds keyed by SKU and idempotent. PROOF: `test_price_change_uses_oldest_point` fails on the old code and passes now; `test_google_trends_returns_empty_when_unavailable`; `test_emag_price_parsing` covers `2 499 RON` (was 2.0, now 2499.0). |
-| 1.7.0 | (local, uncommitted) | **Test suite** | `003` (to write) | SHIPPED: `backend/tests/conftest.py` (scratch `marketpulse_test` DB, created and dropped per session), `test_api.py` (contract shapes), `test_services.py` (derivations), `test_connectors.py` (hermetic), `test_connectors_live.py` (opt-in via `MARKETPULSE_LIVE_TESTS=1`); `playwright.config.js` + `e2e/smoke.spec.js` + `e2e/pages.spec.js`. PROOF: **56 passed, 3 skipped** backend; **32 passed** Playwright; `npm run build` exit 0. |
-| 1.8.0 | #4 (`8dfcaa0`, merge `a988877`) | **Scripts: one launcher, guided setup, live reload** | `001` | SHIPPED: `run.ps1` / `run.sh` (Setup, Start, Stop, Status, Settings, Reload, Tests, Reset DB, Docs); `scripts/lib.ps1` shared helpers; setup detects Docker vs native MySQL and asks; per-API key prompts with signup URLs; live OpenRouter free-model picker; `settings.ps1` / `settings.sh`; `POST /api/admin/reload` (loopback-only) applies keys without a restart; start scripts never double-start and never kill a foreign process. PROOF: non-interactive setup exit 0; reload proven live; start refuses to double-start; restart stops only our PIDs. |
-| 1.9.0 | #4 (`8dfcaa0`, merge `a988877`) | **OpenRouter everywhere + non-blocking LLM** | `002` | SHIPPED: `openrouter` is an advisor provider and the default (one key covers every AI surface); `/admin/reload` on the assistant service; output budget read from each model's `max_completion_tokens` with `reasoning.effort=high`; `extract_json` takes the outermost structure; the three LLM surfaces read cache-only and generate in a `BackgroundTask` (`source: "pending"`); Reddit gains OAuth with `last_status`; default model `dots-studio/dots-3-note-preview:free`. PROOF: **70 passed, 3 skipped**; **32 Playwright**; build exit 0; live OpenRouter calls returned model-written text on all four surfaces; product detail 54 s → 0.1 s on a cache miss. |
+| 1.1.0 | local | **MySQL local database** | `001` + USER DECISIONS 2026-11-07 | `docker-compose.yml` (MySQL 8.4, host 3307, healthcheck); PyMySQL; `connection.py` refuses a non-MySQL URL and has **no** silent SQLite fallback. PROOF: container healthy in 12 s, `SELECT VERSION()` → 8.4.11, `/health` → `database=healthy`. |
+| 1.2.0 | local | **Five missing endpoints** | `001` | `/api/analytics/brands`, `/consumer-segments`, `/competitors`, `/api/marketing/trends`, `/api/products/compare`. PROOF: all 200 with computed data. |
+| 1.3.0 | local | **Reshape the five existing endpoints** | `001` | `schemas/dto.py`, `services/analytics_service.py`; overview → kpis/evolution/mentions/topMovers; sentiment → distribution/trend/aspects/keywords/reviews; recommendations → summary/items. Legacy contracts kept under new paths. PROOF: every endpoint 200, distribution sums to 100. |
+| 1.4.0 | local | **Remove mocks and hardcoded numbers** | `001` | `src/mocks/` deleted; `api.js` has no fallback; all 23 hardcoded figures replaced; `Layout` shows real status. PROOF: 8 routes render real MySQL data, zero error states. |
+| 1.6.0 | local | **Data-integrity fixes** | `001` | `forecasting.py` oldest/newest inversion; `prices.py` old_price; `google_trends.py` no fabricated score; `emag._clean_price` space separators; seeds keyed by SKU. PROOF: regression tests that fail on the old code. |
+| 1.7.0 | local | **Test suite** | `003` | `conftest.py` (scratch `marketpulse_test` DB), `test_api.py`, `test_services.py`, `test_connectors.py`, `test_connectors_live.py` (opt-in); `playwright.config.js`, `e2e/smoke.spec.js`, `e2e/pages.spec.js`. PROOF: 56 pytest, 32 Playwright, build exit 0. |
+| 1.8.0 | `c9516af` | **Scripts: launcher, guided setup, live reload** | `001` | `run.ps1`/`run.sh` (9 options); `scripts/lib.ps1`; setup detects Docker vs native MySQL and asks; per-API key prompts; live OpenRouter free-model picker; `settings.ps1`/`settings.sh`; `POST /api/admin/reload` (loopback-only); start never double-starts and never kills a foreign process. PROOF: non-interactive setup exit 0; reload proven live; start refuses to double-start. |
+| 1.9.0 | **#4** `8dfcaa0` → `a988877` | **OpenRouter everywhere + non-blocking LLM** | `002` | `openrouter` is an advisor provider and the default; `/admin/reload` on the assistant; output budget from each model's `max_completion_tokens` with `reasoning.effort=high`; `extract_json` takes the outermost structure; the three LLM surfaces read cache-only and generate in a `BackgroundTask`; Reddit OAuth with `last_status`; default model `dots-studio/dots-3-note-preview:free`. PROOF: 70 pytest, 32 Playwright, build exit 0; live calls on all four surfaces; drawer 54 s → 0.1 s. |
+| 1.9.1 | `764bd88` | **Assistant grounded in live MySQL** | `002` | `load_market_data()` builds the context from the running API (`/analytics/overview`, `/brands`, `/products`, `/consumer-segments`, `/sentiment`, `/competitors`) and caches it 2 minutes; `market_data.json` only as a fallback, marked `source: "snapshot"`. **Why:** the assistant answered "Samsung 79, average 82.6" from the stale snapshot; MySQL says 82.9 and 76.1. PROOF: `load_market_data(force=True)` → `source=live`; live chat now answers 82.9 / 76.1. |
 
-**Investigations finished (no release):** `001-audit-and-integration.md` — the full audit; all nine questions answered.
+**Investigations finished (no release):** `001-audit-and-integration.md` — the full audit, all nine questions answered.
 
 ---
 
 ## HELD — waits until the user says go
-- **Push to `origin/main`** — the user asked for a commit and push; the push happens in this turn.
+
+- **Push of the E2E fixer's branch** — it commits to `fix/e2e-findings` and does not push. Merging needs the gate re-run and the user's go.
 - **Removing `node_modules/` from git history** — 89.8 MB committed; destructive, needs its own go.
-- **OpenRouter key and model id** — the user supplies both.
+- **Ollama / Groq / Gemini** — implemented, never exercised against a real provider.
+- **Reddit OAuth** and **X credits** — see QUEUED items 4 and 5.
