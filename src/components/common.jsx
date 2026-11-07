@@ -1,6 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, AlertCircle, Boxes, Heart, Layers3, MessageSquareText, Sparkles, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BRANDS } from "../mocks/marketData.js";
+import { useChat, useRegisterChart } from "../context/ChatContext.jsx";
 
 export const BRAND_COLORS = Object.fromEntries(BRANDS.map(({ name, color }) => [name, color]));
 export const SENTIMENT_COLORS = { positive: "var(--positive)", neutral: "var(--neutral)", negative: "var(--negative)" };
@@ -28,8 +29,12 @@ export function KpiCard({ label, value, suffix, change, note, tone = "positive",
   );
 }
 
-export function ChartCard({ title, subtitle, action, className = "", children }) {
-  return <section className={`panel chart-card ${className}`}><div className="panel-heading"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{action && <div className="panel-action">{action}</div>}</div>{children}</section>;
+// Pass `data` (the rows the chart plots) to let the in-app assistant analyse the chart.
+export function ChartCard({ title, subtitle, action, className = "", data, note, children }) {
+  const { askAssistant } = useChat();
+  const id = useRegisterChart(data ? { title, subtitle, data, note } : null);
+  const analyse = id && <button type="button" className="chart-ask-ai" onClick={() => askAssistant(`Analyse the "${title}" chart`, id)} title="Analyse this chart with MarketPulse AI"><Sparkles size={13} /><span>Analyse</span></button>;
+  return <section className={`panel chart-card ${className}`}><div className="panel-heading"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{(action || analyse) && <div className="panel-action">{action}{analyse}</div>}</div>{children}</section>;
 }
 
 export function SentimentBadge({ sentiment, children }) {

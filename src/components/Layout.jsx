@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Activity, ArrowUpRight, BarChart3, ChevronLeft, ChevronRight, Command, Cpu, Headphones, LayoutDashboard, Menu, MessageCircle, Moon, Search, Sparkles, Sun, Users, X } from "lucide-react";
 import FilterBar from "./FilterBar.jsx";
+import AssistantChat from "./AssistantChat.jsx";
 import { useTheme } from "../context/AppContext.jsx";
 
 const navItems = [
@@ -20,6 +21,7 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const pageTitle = navItems.find((item) => item.end ? location.pathname === item.to : location.pathname.startsWith(item.to))?.label || "Dashboard";
 
   useEffect(() => { setMobileOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }, [location.pathname]);
   useEffect(() => {
@@ -55,6 +57,7 @@ export default function Layout() {
         <main className="main-content"><Outlet /></main>
         <footer className="app-footer"><span>MarketPulse AI <span className="footer-dot">·</span> Market intelligence, in focus.</span><span><Search size={13} /> Data refreshed 4 min ago <span className="live-dot" /></span></footer>
       </div>
+      <AssistantChat pageTitle={pageTitle} pagePath={location.pathname} />
     </div>
   );
 }

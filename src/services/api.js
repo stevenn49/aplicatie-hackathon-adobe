@@ -46,4 +46,56 @@ export const getCompetitors = () => request("/analytics/competitors", {
   brands: BRANDS,
   priceDifferences: products.slice(0, 5).map((product) => ({ name: product.name, brand: product.brand, price: product.price, baseline: 999, difference: product.price - 999 })),
 });
-export const getRecommendations = (filters = {}) => request("/analytics/recommendations", filters.category && filters.category !== "All" ? recommendations.filter((item) => item.category === filters.category) : recommendations);
+const AI_API_URL = import.meta.env.VITE_AI_API_URL || "";
+
+// AI recommendations come from the Python AI backend (backend/server.py) when
+// VITE_AI_API_URL is set; on any failure the page falls back to the mock recommendations.
+export async function getRecommendations(filters = {}) {
+  const fallback = filters.category && filters.category !== "All" ? recommendations.filter((item) => item.category === filters.category) : recommendations;
+  if (!AI_API_URL) return request("/analytics/recommendations", fallback);
+  const params = new URLSearchParams();
+  if (filters.category && filters.category !== "All") params.set("category", filters.category);
+  try {
+    const response = await fetch(`${AI_API_URL}/analytics/recommendations?${params}`);
+    if (!response.ok) throw new Error(`AI backend returned ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.warn("AI recommendations unavailable, using mock data:", error);
+    return structuredClone(fallback);
+  }
+}
+
+// In-app assistant (backend/assistant.py). Streams Markdown; onText receives the full text so far.
+export async function streamAssistantChat(payload, onText, signal) {
+  if (!AI_API_URL) throw new Error("Set VITE_AI_API_URL in .env.local and start the backend to use the assistant.");
+  let response;
+  try {
+    response = await fetch(`${AI_API_URL}/ai/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal });
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new Error(`Cannot reach the AI backend at ${AI_API_URL}. Start it with: uvicorn server:app --port 8000 (in backend/).`);
+  }
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `Request failed (${response.status})`);
+  const meta = { intent: response.headers.get("X-Intent"), model: response.headers.get("X-Model") };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    onText(text, meta);
+  }
+  return { text, ...meta };
+}
+
+export async function askMarketingAdvisor(question, brand, history = []) {
+  if (!AI_API_URL) throw new Error("Set VITE_AI_API_URL to use the marketing advisor");
+  const response = await fetch(`${AI_API_URL}/ai/advice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, brand: brand === "All brands" ? null : brand, history }),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `Request failed (${response.status})`);
+  return response.json();
+}
