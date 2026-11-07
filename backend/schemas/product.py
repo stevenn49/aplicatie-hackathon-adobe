@@ -36,6 +36,10 @@ class ProductUpdate(BaseModel):
 
 
 class ProductResponse(ProductBase):
+    # Stored names can exceed the 150-character rule that ProductCreate applies
+    # to user input: eMAG titles routinely do, and refusing them here turned a
+    # successful import into a 500 at serialisation time.
+    name: str
     id: int
     rating: Optional[float] = Field(default=0.0)
     review_count: Optional[int] = Field(default=0)
