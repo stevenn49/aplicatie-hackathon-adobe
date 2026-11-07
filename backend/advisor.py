@@ -12,8 +12,10 @@ Core logic shared by the CLI (marketing_advisor.py) and the API (server.py).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
 from pathlib import Path
 
 import requests
@@ -21,6 +23,8 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
+
+logger = logging.getLogger("marketpulse.advisor")
 
 DEFAULT_OPENROUTER_MODEL = "stealth/crouton-alpha"
 
@@ -95,9 +99,112 @@ class AdvisorError(RuntimeError):
 set_provider()
 
 
-def load_market_data() -> dict:
+MARKET_DATA_CACHE_TTL = 120
+_market_data_cache: dict = {"at": 0.0, "data": None, "source": ""}
+
+
+def _api_base() -> str:
+    """The main API, which owns the live MySQL data."""
+    return os.getenv("MARKETPULSE_API_URL", "http://127.0.0.1:8010").rstrip("/")
+
+
+def _fetch_json(path: str, timeout: int = 10):
+    response = requests.get(f"{_api_base()}{path}", timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def _live_market_data() -> dict | None:
+    """
+    Builds the context the assistant needs from the running API, so every number
+    it quotes comes from MySQL rather than from a snapshot file.
+
+    Returns None when the API is unreachable; the caller then falls back to
+    market_data.json and says so.
+    """
+    try:
+        overview = _fetch_json("/api/analytics/overview")
+        brands = _fetch_json("/api/analytics/brands")
+        products = _fetch_json("/api/products")
+        segments = _fetch_json("/api/analytics/consumer-segments")
+        sentiment = _fetch_json("/api/analytics/sentiment")
+        competitors = _fetch_json("/api/analytics/competitors")
+    except Exception as exc:
+        logger.warning(f"Live market data unavailable ({exc}); falling back to market_data.json")
+        return None
+
+    return {
+        "source": "live",
+        "kpis": overview.get("kpis", []),
+        "brands": [
+            {"name": b.get("name"), "color": b.get("color"), "share": b.get("share"), "health": b.get("health")}
+            for b in competitors.get("brands", [])
+        ],
+        "brandStats": [
+            {
+                "brand": b.get("brand"),
+                "shareOfVoice": b.get("shareOfVoice"),
+                "mentions": b.get("mentions"),
+                "sentiment": b.get("sentiment"),
+                "health": b.get("health"),
+                "topics": b.get("topics", []),
+                "concerns": b.get("concerns", []),
+            }
+            for b in brands
+        ],
+        "products": [
+            {
+                "name": p.get("name"),
+                "brand": p.get("brand"),
+                "category": p.get("category"),
+                "price": p.get("price"),
+                "currency": p.get("currency"),
+                "rating": p.get("rating"),
+                "sentiment": p.get("sentiment"),
+                "change": p.get("change"),
+                "interest": p.get("interest"),
+                "review_count": p.get("review_count"),
+                "pros": p.get("pros", []),
+                "cons": p.get("cons", []),
+            }
+            for p in products
+        ],
+        "segments": segments,
+        "sentiment": {
+            "distribution": sentiment.get("distribution", []),
+            "aspects": sentiment.get("aspects", []),
+            "keywords": sentiment.get("keywords", []),
+            "reviews": sentiment.get("reviews", []),
+            "total_reviews": sentiment.get("total_reviews", 0),
+        },
+        "mentions": overview.get("mentions", []),
+        "competitors": competitors,
+    }
+
+
+def load_market_data(force: bool = False) -> dict:
+    """
+    The data the assistant reasons about.
+
+    Prefers the live API (MySQL) and caches it for two minutes. Falls back to the
+    bundled market_data.json only when the API is unreachable, and marks the
+    result `source: "snapshot"` so the prompt can tell the model which it is.
+    """
+    now = time.time()
+    cached = _market_data_cache
+    if not force and cached["data"] is not None and now - cached["at"] < MARKET_DATA_CACHE_TTL:
+        return cached["data"]
+
+    live = _live_market_data()
+    if live is not None:
+        cached.update({"at": now, "data": live, "source": "live"})
+        return live
+
     with open(BASE_DIR / "market_data.json", encoding="utf-8") as f:
-        return json.load(f)
+        snapshot = json.load(f)
+    snapshot["source"] = "snapshot"
+    cached.update({"at": now, "data": snapshot, "source": "snapshot"})
+    return snapshot
 
 
 def build_context(data: dict, brand: str | None = None) -> str:
