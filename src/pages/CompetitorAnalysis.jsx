@@ -47,7 +47,7 @@ export default function CompetitorAnalysis() {
       />
 
       <div className="competitor-primary-grid">
-        <ChartCard title="Competitive positioning" subtitle="Average product price vs. perceived quality" className="positioning-card">
+        <ChartCard title="Competitive positioning" subtitle="Average product price vs. perceived quality" data={positioning} className="positioning-card">
           {positioning.length ? (
             <>
               <ResponsiveChart height={305}>
@@ -83,7 +83,7 @@ export default function CompetitorAnalysis() {
           ) : <EmptyState title="Not enough data for positioning" description="Each brand needs at least one product with reviews." />}
         </ChartCard>
 
-        <ChartCard title="Price difference" subtitle="Price vs. the category median" className="price-difference-card">
+        <ChartCard title="Price difference" subtitle="Price vs. the category median" data={priceRows} className="price-difference-card">
           {priceRows.length ? (
             <>
               <ResponsiveChart height={286}>

@@ -3,6 +3,7 @@ from typing import Optional, List
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 
 from database.connection import get_db, SessionLocal
 from database.models import Product as ProductModel, PriceHistory as PriceHistoryModel, Review as ReviewModel
@@ -343,7 +344,15 @@ def create_product(product_data: ProductCreate, db: Session = Depends(get_db)):
     new_product = ProductModel(**product_dict)
 
     db.add(new_product)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # products.sku is UNIQUE. Without this the driver error surfaced as a 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A product with this SKU already exists"
+        )
     db.refresh(new_product)
 
     db.add(PriceHistoryModel(

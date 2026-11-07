@@ -65,7 +65,7 @@ export default function ConsumerInsights() {
       </div>
 
       <div className="consumer-chart-grid">
-        <ChartCard title="Purchase drivers" subtitle="Aspect scores across the reviews behind these segments">
+        <ChartCard title="Purchase drivers" subtitle="Sentiment for each aspect across the reviews behind these segments" data={drivers}>
           {drivers.length ? (
             <>
               <ResponsiveChart height={264}>
@@ -74,7 +74,7 @@ export default function ConsumerInsights() {
                   <XAxis type="number" domain={[0, 100]} {...axisProps} />
                   <YAxis type="category" dataKey="name" width={152} {...axisProps} />
                   <Tooltip content={<ChartTooltip formatter={(value) => `${value}/100`} />} />
-                  <Bar dataKey="score" name="Influence score" radius={[0, 5, 5, 0]} barSize={15}>
+                  <Bar dataKey="score" name="Sentiment score" radius={[0, 5, 5, 0]} barSize={15}>
                     {drivers.map((driver) => <Cell fill={driver.color} key={driver.name} />)}
                   </Bar>
                 </BarChart>
@@ -87,7 +87,7 @@ export default function ConsumerInsights() {
           ) : <EmptyState title="No aspect data yet" />}
         </ChartCard>
 
-        <ChartCard title="Audience landscape" subtitle="Price sensitivity vs. brand loyalty" className="consumer-scatter-card">
+        <ChartCard title="Audience landscape" subtitle="Price sensitivity vs. brand loyalty" data={segments} className="consumer-scatter-card">
           <ResponsiveChart height={264}>
             <ScatterChart margin={{ top: 10, right: 14, bottom: 4, left: 0 }}>
               <CartesianGrid {...gridProps} />

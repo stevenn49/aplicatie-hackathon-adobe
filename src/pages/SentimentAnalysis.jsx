@@ -79,7 +79,7 @@ export default function SentimentAnalysis() {
           ) : <EmptyState title="No reviews yet" description="Collect reviews to see the sentiment split." />}
         </div>
 
-        <ChartCard title="Sentiment trend" subtitle="Weekly emotion across all reviews" className="sentiment-trend-panel">
+        <ChartCard title="Sentiment trend" subtitle="Weekly emotion across all reviews" data={data.trend} className="sentiment-trend-panel">
           {data.trend.length ? (
             <>
               <ResponsiveChart height={220}>
@@ -114,7 +114,7 @@ export default function SentimentAnalysis() {
       </div>
 
       <div className="sentiment-details-grid">
-        <ChartCard title="Aspect-based sentiment" subtitle="What customers feel about specific features">
+        <ChartCard title="Aspect-based sentiment" subtitle="What customers feel about specific features" data={data.aspects}>
           {data.aspects.length ? (
             <>
               <ResponsiveChart height={278}>

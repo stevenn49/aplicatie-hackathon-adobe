@@ -448,7 +448,21 @@ def _normalize(items: list, data: dict) -> list[dict]:
 def get_recommendations(brand: str | None = None, category: str | None = None, count: int = 5) -> tuple[list[dict], str]:
     """Structured recommendations in the same shape the dashboard's InsightCard uses."""
     data = load_market_data()
-    example = data["exampleRecommendations"][0]
+
+    # The live data has no `exampleRecommendations`; only the bundled snapshot
+    # does. Indexing it unconditionally raised KeyError and returned 500 once the
+    # assistant switched to live data. The example only shapes the prompt, so a
+    # literal fallback is enough.
+    examples = data.get("exampleRecommendations") or [{
+        "category": "Product",
+        "priority": "High",
+        "title": "Act on the weakest aspect",
+        "detail": "The lowest-scoring aspect in the review data is the clearest opening.",
+        "metric": "Aspect score",
+        "confidence": 70,
+        "related": "Brand · Product",
+    }]
+    example = examples[0]
     example = {k: example[k] for k in ("category", "priority", "title", "detail", "metric", "confidence", "related")}
     focus = []
     if brand:
