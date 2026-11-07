@@ -15,9 +15,12 @@ _(no production PR running)_
 
 ## QUEUED (in order)
 
+_(nothing queued; see HELD for the items that need the user's go)_
+
 | # | Item | Version / note | Spec + user decisions | What it does and why |
 |---|---|---|---|---|
-| 5 | **OpenRouter LLM service** | 1.5.0 MINOR, T2 | `002-llm-openrouter.md` (to write) + USER DECISIONS pending | The service, the cache and the three call sites are built and degrade honestly. **Blocked on the user's API key and free model id** — until then every LLM surface reports `"source": "derived"`. |
+| — | **Reddit OAuth in production** | — | — | The connector supports OAuth; the team still has to register an app and put the credentials in `backend/.env`. Without them Reddit contributes nothing. |
+| — | **X/Twitter credits** | — | — | The free tier closed in February 2026. Only worth doing if the team funds credits. |
 
 ---
 
@@ -31,6 +34,8 @@ _(no production PR running)_
 | 1.4.0 | (local, uncommitted) | **Remove mocks and hardcoded numbers** | `001` + USER DECISIONS | SHIPPED: `src/mocks/marketData.js` deleted; `api.js` has no fallback and throws a named `ApiError`; every page consumes the API; all 23 hardcoded figures replaced by computed values or removed; `Layout` shows the real database status, the real recommendation count and the real LLM state. PROOF: all 8 routes render with the backend stopped → `ErrorState`; with it running → real MySQL data. |
 | 1.6.0 | (local, uncommitted) | **Data-integrity fixes** | `001` | SHIPPED: `forecasting.py` oldest/newest inversion; `prices.py` `old_price` captured before reassignment; `google_trends.py` no longer fabricates 88.0/72.0 (returns `[]`, the collector reports the gap); `emag._clean_price` handles space thousands separators and has a real `Tuple` type hint; seeds keyed by SKU and idempotent. PROOF: `test_price_change_uses_oldest_point` fails on the old code and passes now; `test_google_trends_returns_empty_when_unavailable`; `test_emag_price_parsing` covers `2 499 RON` (was 2.0, now 2499.0). |
 | 1.7.0 | (local, uncommitted) | **Test suite** | `003` (to write) | SHIPPED: `backend/tests/conftest.py` (scratch `marketpulse_test` DB, created and dropped per session), `test_api.py` (contract shapes), `test_services.py` (derivations), `test_connectors.py` (hermetic), `test_connectors_live.py` (opt-in via `MARKETPULSE_LIVE_TESTS=1`); `playwright.config.js` + `e2e/smoke.spec.js` + `e2e/pages.spec.js`. PROOF: **56 passed, 3 skipped** backend; **32 passed** Playwright; `npm run build` exit 0. |
+| 1.8.0 | #4 (`8dfcaa0`, merge `a988877`) | **Scripts: one launcher, guided setup, live reload** | `001` | SHIPPED: `run.ps1` / `run.sh` (Setup, Start, Stop, Status, Settings, Reload, Tests, Reset DB, Docs); `scripts/lib.ps1` shared helpers; setup detects Docker vs native MySQL and asks; per-API key prompts with signup URLs; live OpenRouter free-model picker; `settings.ps1` / `settings.sh`; `POST /api/admin/reload` (loopback-only) applies keys without a restart; start scripts never double-start and never kill a foreign process. PROOF: non-interactive setup exit 0; reload proven live; start refuses to double-start; restart stops only our PIDs. |
+| 1.9.0 | #4 (`8dfcaa0`, merge `a988877`) | **OpenRouter everywhere + non-blocking LLM** | `002` | SHIPPED: `openrouter` is an advisor provider and the default (one key covers every AI surface); `/admin/reload` on the assistant service; output budget read from each model's `max_completion_tokens` with `reasoning.effort=high`; `extract_json` takes the outermost structure; the three LLM surfaces read cache-only and generate in a `BackgroundTask` (`source: "pending"`); Reddit gains OAuth with `last_status`; default model `dots-studio/dots-3-note-preview:free`. PROOF: **70 passed, 3 skipped**; **32 Playwright**; build exit 0; live OpenRouter calls returned model-written text on all four surfaces; product detail 54 s → 0.1 s on a cache miss. |
 
 **Investigations finished (no release):** `001-audit-and-integration.md` — the full audit; all nine questions answered.
 

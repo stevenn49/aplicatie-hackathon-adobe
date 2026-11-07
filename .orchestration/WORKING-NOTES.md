@@ -291,6 +291,8 @@ READ-ONLY: no git writes, no edits outside its scratchpad and the spec, never to
 | --- | --- | --- | --- |
 | (seeded) | 2026-11-07 | — | Repo cloned at `f8b0b2c` on `main`. Seeded from git log: `5f5aad2` clean start → `3de31f3` final frontend commit → `081216c` FastAPI backend → `f8b0b2c` merge of `feature/add-backend`. No releases, no tags, no CI. |
 | 1.1.0–1.7.0 | 2026-11-07 | local | The integration arc: MySQL in Docker on 3307 with no silent fallback; the five missing endpoints; the five reshaped ones; mocks and hardcoded numbers removed; four data-integrity bugs fixed; pytest + Playwright suites. Gate: 56 pytest passed / 3 skipped, 32 Playwright passed, `npm run build` exit 0. Deviations: backend on 8010 because 8000 is taken on this machine. Not done: OpenRouter key and model id (LLM surfaces report `derived`). |
+| 1.8.0 | 2026-11-07 | #4 | One interactive launcher in the repo root (`run.ps1` / `run.sh`), a guided setup that detects Docker vs native MySQL and asks for each API key, a settings manager, and `POST /api/admin/reload` so a key applies without a restart. |
+| 1.9.0 | 2026-11-07 | #4 (merge `a988877`) | OpenRouter as an assistant provider and the default; output budget read from each model's metadata with `reasoning.effort=high`; JSON extraction takes the outermost structure; the three LLM surfaces read cache-only and generate in a background task; Reddit gains OAuth. Gate: **70 pytest passed / 3 skipped**, **32 Playwright passed**, build exit 0. Live OpenRouter calls verified on all four surfaces. |
 
 ---
 
@@ -318,6 +320,13 @@ One bullet per lesson, with the evidence that makes it memorable and its origin.
 - 2026-11-07: MySQL 8.4 removed `--default-authentication-plugin`. Passing it makes mysqld abort with `unknown variable`, and the entrypoint then leaves a half-initialised data directory that reports `Table 'mysql.plugin' doesn't exist` on every retry. Drop the flag and recreate the volume.
 - 2026-11-07: A port can be owned by two processes at once on Windows when one binds `0.0.0.0` and the other `127.0.0.1`. `Get-NetTCPConnection -LocalPort 8000` showed both; the `0.0.0.0` listener answered the request. Always check the wildcard bind, not just the loopback one.
 - 2026-11-07: A passing UI is not a passing product. The dashboard rendered perfectly for weeks with no backend at all. The Playwright suite now asserts against the API response, not against the rendered text alone.
+- 2026-11-07: A free model can be listed and still be unusable. `stealth/crouton-alpha` is the largest free model on OpenRouter and answers `403 This model is not available in your region` from this network. Probe the catalogue from the machine that will run the app before choosing a default.
+- 2026-11-07: A reasoning model spends the output budget thinking. `dots-3-note-preview` returned an empty `content` with `finish_reason=length` at 900, 2000 and 4000 max_tokens, and only produced JSON at 8000 (5,284 of them reasoning). Read `top_provider.max_completion_tokens` from `/api/v1/models` and size the request from it; never assume a small budget is enough.
+- 2026-11-07: A 50-second endpoint looks like a broken app. The product drawer blocked on the LLM call and the Playwright suite failed on the first run, then passed on the second because the cache was warm. Read the cache, answer immediately, generate in a `BackgroundTask`, and label the state `pending`.
+- 2026-11-07: Reddit's public `.json` endpoints returned `403` on 2026-11-07. Reddit requires OAuth since 2026; the connector now authenticates and reports `last_status` instead of returning an unexplained empty list.
+- 2026-11-07: The X/Twitter free tier closed to new developers on 2026-02-06. Access is pay-per-use (~$0.005 per post read) and a bearer token alone returns 402 without credits. Treat X as a paid source, not a free one.
+- 2026-11-07: `Start-Process` children hold inherited console handles, so a script that starts a server and then `exit`s leaves the host waiting. `[Environment]::Exit(0)` in the detach path is what actually returns control.
+- 2026-11-07: A `$script:` variable set by the caller is not reliably visible inside functions defined in a dot-sourced file. Use `$global:` for the non-interactive flag, and guard prompts with `[Console]::IsInputRedirected` so a scripted run never blocks on `Read-Host`.
 
 ---
 
