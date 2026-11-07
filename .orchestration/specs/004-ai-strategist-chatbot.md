@@ -1,316 +1,729 @@
-# INVESTIGATION — AI Marketing Strategist chatbot (2026-11-07, read-only, Opus 5)
+# INVESTIGATION — AI Marketing Strategist & Data Analyst (2026-11-07, read-only, Opus 5)
 
-Written from the user's verbatim requirements, quoted in full in §1. Nothing outside `.orchestration/` was edited. No live LLM call was made while writing this. CONFIRMED = read the exact line or ran the command, output shown; UNVERIFIED = inferred from reading, not executed; NOT DONE = skipped, and why.
+Read-only investigation for the next product step: turn the existing "Ask AI" assistant into a full
+AI Marketing Strategist & Data Analyst. No code was changed, no commit was made, no service was started.
+CONFIRMED = ran it or read the exact line, output shown; UNVERIFIED = inferred, not proven; NOT DONE = skipped, and why.
+
+The requirements in §1 are the user's words, verbatim (translated where Romanian prose was quoted),
+and every one of them is treated as a requirement in §2–§5.
+
+---
 
 ## 0. Answer in five lines
 
-The chat **exists and works**: a floating "Ask AI" panel (`src/components/AssistantChat.jsx`), a streaming endpoint (`backend/server.py:125`), intent detection and pre-computed chart facts (`backend/assistant.py`), and a small Markdown renderer (`AssistantChat.jsx:25-70`). It is a **single-shot Q&A over the current page's charts**, not the strategist the user describes: no orchestrator/tool selection, no strategy generator with the ten required components, no SWOT/persona/KPI/what-if/opportunity modules, no platform control, no conversation persistence, and chart intelligence only sees charts mounted on the page the user is on. The gap is therefore **not a rewrite of the chat** but **five new capabilities behind one orchestrator**, plus three UI upgrades (formatted streaming, optional dock, declarative actions). Recommended delivery in three slices (§5.4), smallest first, each independently shippable and each provable against live MySQL. Ten questions in §7, each with a recommendation; "all rec" accepts every one.
+A working assistant already exists and is better than a generic chatbot: it streams Markdown, receives the
+**real rows** of every chart on the page, pre-computes exact facts (rankings, peaks, % change, gaps) so a small
+model cannot do arithmetic wrong, and is grounded in the live MySQL API. What it is **not**: it has no tools,
+no structured strategy template, no anomaly/correlation analysis, no UI control, no citations, no persistence,
+and its grounding silently falls back to a **stale static snapshot** — measured below, the live assistant
+answered with snapshot numbers (24% segment share, sensitivity 82) while the dashboard showed 37.5% and 0.0.
+The gap is therefore not "connect an LLM" (done) but "give the LLM a controlled tool layer, a module
+architecture, and an honest missing-data policy". Recommended first delivery: orchestrator + tool registry +
+typed SSE + permanent panel (Phase 0), then Chart Intelligence v2 and the Strategy Generator, which together
+are the visible transformation. 10 numbered questions for the user are in §7.
 
-## 1. The problem as reported (verbatim from the user)
+---
 
-> „Da! Eu aș duce chatbot-ul MarketPulse AI mult mai departe decât un simplu asistent care răspunde la întrebări. L-aș transforma într-un AI Marketing Strategist & Data Analyst, adică un consultant virtual care poate interpreta datele pieței, explica vizualizările din dashboard și construi strategii de marketing argumentate.
->
-> Practic, utilizatorul nu ar trebui doar să vadă niște grafice, ci să poată discuta cu aplicația despre ceea ce înseamnă acele grafice și ce decizii ar putea lua pe baza lor."
+## 1. The problem as reported (verbatim requirements)
 
-> „Nu vreau să fie un chatbot generic care oferă răspunsuri de tipul „postează mai des pe Instagram". Trebuie să analizeze contextul companiei, produsului, consumatorilor și concurenței înainte să ofere recomandări."
+> "I'd take the MarketPulse AI chatbot much further than a simple assistant that answers questions. I'd turn it
+> into an AI Marketing Strategist & Data Analyst — a virtual consultant that can interpret market data, explain
+> the dashboard's visualisations, and build argued marketing strategies. The user should not just look at charts,
+> but be able to discuss with the app what those charts mean and what decisions they could take from them."
 
-> „Important: chatbot-ul trebuie să primească datele reale din grafic, nu doar o imagine a acestuia. Astfel, poate face calcule și interpreta valorile corect."
+The user then enumerated six blocks. Each is a requirement, reproduced here so nothing is lost:
 
-> „Aici este partea cea mai importantă: nu este suficient să conectăm un model AI la un câmp de chat. Trebuie să construim un sistem care îi oferă acces controlat la informațiile MarketPulse AI."
+**1. Identity.** Three competences in one assistant: *marketing strategist* (strategies, campaigns),
+*data analyst* (interprets data and charts), *market researcher* (trends, competitive opportunities).
+Explicitly **not** a generic chatbot that says "post more often on Instagram" — it must analyse the company,
+product, consumer and competitor context before recommending.
 
-> „De asemenea să regândim puțin poziția chatbotului să fie cumva mai permanent, poate pus în dreapta într-un mic window de sus până jos sub formă de chat, să aibă toate skill-urile și uneltele necesare pentru a putea face tot + interacționa direct cu platforma și a o și controla: arată tab-uri, ajută, explică full, să poată controla tot pentru a ajuta user-ul și oferi totul posibil."
+**2. Modules.**
+- **A. Marketing Strategy Generator (priority).** Full strategy for a product/brand: Market Research,
+  Target Audience, Segmentation, Positioning, SWOT, Marketing Mix (4P), Campaign Strategy, Budget Allocation,
+  KPIs, Timeline. Must explain **why** each recommendation and **which data** supports it.
+- **B. Chart Intelligence (priority).** Explain any dashboard chart: (1) what it represents, (2) overall trend,
+  (3) max/min, (4) unusual fluctuations, (5) factors that could explain the evolution *if data supports them*,
+  (6) marketing implications, (7) actions. Must also answer: "why did positive sentiment drop?", "which brand
+  has the best perception?", "which product has the most negative reviews?", "how do price and rating
+  correlate?", "what trends in the last 30 days?". Must receive the **real data, not an image**.
+- **C. Consumer Intelligence.** Preferences, segmentation, purchase drivers, recurring complaints, liked
+  features, comparison between consumer categories. Example: "why do users prefer Apple over Samsung?" —
+  grouped on ecosystem, design, performance, price, user experience.
+- **D. Competitor Intelligence.** Brand comparison: positioning, price differences, consumer perception,
+  competitive advantages, weaknesses from reviews, differentiation opportunities.
+- **E. Campaign & Content Generator.** Campaign ideas, ad messages, slogans, social content, editorial
+  calendar, influencer collaborations, launch campaigns, loyalty campaigns.
 
-> „BTW amplasarea cu buton pentru Ask AI care deschide un window over e super practică, super mișto — o vom păstra în timp ce extindem cu toate aceste chestii."
+**3. How it should think.** Not just a model wired to a chat box: a system giving the model *controlled access*
+to MarketPulse information. Components named by the user: *AI Orchestrator* (understands the question, selects
+tools), *Analytics Engine*, *Marketing Engine*, *Data Retrieval*, *Consumer Intelligence*, *Grounded AI Response*.
+Technology table proposed by the user: AI Orchestrator Python, API FastAPI, LLM "OpenAI API or other compatible
+model", Data Analysis Pandas/NumPy, ML Scikit-learn, NLP Transformers, Database PostgreSQL, Context retrieval
+SQL + eventual RAG, Frontend React. Explicit: **do not train a model from scratch** — use an existing LLM
+connected to MarketPulse data and functions.
 
-> „vom vrea să vedem output cu streaming în agent frumos formatat."
+**4. Advanced features.** (1) Marketing Opportunity Detection, (2) Predictive Marketing Insights (with an
+explicit uncertainty warning), (3) Automated SWOT, (4) Customer Persona Generator, (5) Marketing KPI Advisor
+(CTR, Conversion Rate, CAC, ROAS, Engagement Rate, Customer Retention Rate), (6) What-if Analysis
+("what if I cut the price 10%?") — using historical data or **explicit assumptions**, never presented as certainty.
 
-The five modules (A–E), the six advanced features, the architecture table and the technology table the user listed are reproduced verbatim in §4.1–§4.3 so no requirement is lost in paraphrase.
+**5. UI repositioning.** "Let's rethink the chatbot position so it is somehow more permanent, maybe on the right
+in a small window from top to bottom as a chat, with all the skills and tools needed to do everything **+ interact
+directly with the platform and control it**: show tabs, help, explain fully, control everything to help the user."
+And explicitly: **"the Ask AI button that opens an overlay window is super practical — we'll keep it while
+extending with all these things."**
 
-## 2. Measured findings — what already exists
+**6. Streaming.** Wants streamed output, nicely formatted (rendered Markdown: headings, lists, bold, tables).
+The brief asks to check what exists in `src/components/AssistantChat.jsx` and `src/services/api.js` and say what
+is missing for smooth streaming (incremental rendering, typing cursor, tables, code).
 
-### 2.1 The chat surface — CONFIRMED
+**Deadline for this spec:** 19:30 today. Implementation is a separate, later decision.
 
-| What | Where | State |
+---
+
+## 2. Measured findings
+
+### 2.1 What the assistant is today (CONFIRMED — every line read)
+
+| Piece | File:line | What it actually does |
 |---|---|---|
-| Floating launcher "Ask AI" | `src/components/AssistantChat.jsx:131` | exists, `aria-label`, fixed bottom-right (`src/styles/*.css:835`) |
-| Overlay panel | `AssistantChat.jsx:132-157`, CSS `:838` | exists, `role="dialog"`, `aria-label`, Esc to close (`:88-93`) |
-| Header (avatar, title, "Sees N charts on <page>") | `AssistantChat.jsx:133-138` | exists |
-| New conversation | `AssistantChat.jsx:136` (`reset`, `:126`) | exists — clears React state only |
-| Stop generation | `AssistantChat.jsx:153` (`stop`, `:125`) | exists — `AbortController` |
-| 6 quick actions | `AssistantChat.jsx:12-22` | exists |
-| Per-chart "Analyse" list | `AssistantChat.jsx:143` | exists, driven by registered charts |
-| Message list, `aria-live="polite"` | `AssistantChat.jsx:139-150` | exists |
-| Intent + model badge | `AssistantChat.jsx:148` | exists (`X-Intent`, `X-Model`) |
-| Minimal Markdown (bold/em/code/headings/lists/tables) | `AssistantChat.jsx:25-70` | exists — see §2.4 for what it cannot render |
-| Streaming transport | `src/services/api.js:148-169` | exists — `response.body.getReader()`, `onText(fullText, meta)` |
-| Chart registration store | `src/context/ChatContext.jsx:5-16`, `:46-55`, `:58-61` | exists — external store, no re-render |
-| "Analyse" button → chat request | `ChatContext.jsx:26-29` (`askAssistant`) | exists, used by every `ChartCard` |
+| Separate FastAPI app | `backend/server.py:17-24` | A **second** app, not `main.py`. Own CORS regex, own port (started on 8020 on this machine). |
+| Chat endpoint | `backend/server.py:125-141` | `POST /ai/chat`, streams `text/plain`, headers `X-Intent`, `X-Model`. |
+| Advice endpoint | `backend/server.py:144-150` | `POST /ai/advice`, non-streaming. **No caller in `src/`** (only `askMarketingAdvisor` in `api.js:171-180`, itself unused). |
+| Recommendations endpoint | `backend/server.py:100-113` | `GET /analytics/recommendations`, 10-minute in-process cache. Not called by the frontend. |
+| Request contract | `backend/server.py:116-122` | `message, history, brand, page{path,title,filters}, charts[{id,title,subtitle,data,note}], focusChart`. |
+| Intent detection | `backend/assistant.py:22-43`, `:53-60` | **Keyword substring matching** over 9 intents (`chart_analysis, campaign, calendar, copy, competitor, sentiment, summary, ideas`), first match wins, `general` fallback. No model, no tools. |
+| System prompt | `backend/assistant.py:45-50` | "You are MarketPulse AI… ground everything in the data provided… never invent metrics." |
+| Chart facts | `backend/assistant.py:75-120` | Deterministic stats: time series → first→last with % change, peak, low, ranking at the last point, fastest growth; categories → ranking, highest/lowest, gap, average. |
+| Chart block | `backend/assistant.py:133-163` | Focused chart gets **full rows**; other charts get facts and, while the character budget allows, rows. Caps: `MAX_CHART_ROWS=40`, `MAX_CHART_CHARS=7000` (`:18-20`). |
+| Chart guidance | `backend/assistant.py:166-172` | Per-kind instruction (categories → ranking only, no invented trends; time series → direction/peak/leader; records → themes). |
+| Prompt assembly | `backend/assistant.py:190-214` | system prompt + market snapshot (omitted when a chart is focused, `:204`) + page/filters + charts + task + "quote numbers exactly" (`:199`) + trimmed history (`:175-187`, 6000 chars). |
+| Streaming | `backend/assistant.py:217-228` → `backend/advisor.py:314-383` | Provider-agnostic SSE reader; yields `(delta, model)` per chunk (`advisor.py:375-377`); models tried in order. |
+| Providers | `backend/advisor.py:33-59` | openrouter (default), groq, gemini, ollama. One key drives every surface (`:79-86`). |
+| Live grounding | `backend/advisor.py:117-182` | Fetches 6 endpoints from the main API (`/api/analytics/overview`, `/brands`, `/products`, `/consumer-segments`, `/sentiment`, `/competitors`) and reshapes them. |
+| Snapshot fallback | `backend/advisor.py:185-207` | Any exception → `backend/market_data.json`, `source: "snapshot"`, **only a `logger.warning`** (`:133`). |
+| Context builder | `backend/advisor.py:210-233` | JSON of kpis, brands, brandStats, products, segments, sentiment aspects/keywords/reviews, mentions. |
+| Frontend panel | `src/components/AssistantChat.jsx:73-157` | Floating panel, open/close, quick actions, 6 chart chips, send/stop/reset. |
+| Chart registration | `src/context/ChatContext.jsx:5-16`, `:46-55`, `:58-61` | External store keyed by chart title slug; `ChartCard data={...}` and `<ChartData/>` register rows. |
+| Chart "Analyse" button | `src/components/common.jsx:36-41` | `askAssistant('Analyse the "X" chart', id)` → opens panel and sends. |
+| HTTP client | `src/services/api.js:145-169` | `streamAssistantChat` accumulates the full text and calls `onText(fullText)` on **every** chunk. |
+| Mount point | `src/components/Layout.jsx:115` | `<AssistantChat pageTitle pagePath />` inside the app shell. |
 
-### 2.2 The backend — CONFIRMED
+**Intent coverage vs the five modules.** `campaign`, `calendar`, `copy`, `competitor`, `sentiment`, `summary`,
+`ideas` exist as *prompt formats only* (`assistant.py:27-42`). There is no strategy template, no SWOT, no
+persona, no what-if, no KPI advisor, no opportunity detection, no prediction. `chart_analysis` is the only
+intent with real computation behind it.
 
-| What | Where | State |
+**No tool layer.** `grep` for `tools|tool_choice|function_call|tool_calls` across `assistant.py`, `advisor.py`,
+`server.py` returns nothing. The model cannot ask for a calculation; it gets one fixed prompt and answers.
+
+### 2.2 What data exists for grounding (CONFIRMED — endpoints called, output read)
+
+| Endpoint (main API, 8010) | Returns | Live volume on this machine |
 |---|---|---|
-| `POST /ai/chat` streaming | `backend/server.py:125-141` | exists; `StreamingResponse`, `text/plain`, `X-Intent`/`X-Model` headers |
-| `ChatRequest` shape | `backend/server.py:116-122` | `message, history, brand, page{path,title,filters}, charts[], focusChart` |
-| Intent detection | `backend/assistant.py:53-60`, table `:22-43` | **keyword matching** over 8 intents |
-| Pre-computed chart facts | `backend/assistant.py:75-120` | exists — time-series/categories/records, rankings, peaks, % change |
-| Chart → prompt | `backend/assistant.py:133-163` | exists; focused chart gets raw data, others get facts |
-| Prompt assembly | `backend/assistant.py:190-214` | exists; background first, task last |
-| History trimming | `backend/assistant.py:175-187` | exists, 6000-char budget, last 12 turns at the endpoint |
-| Streaming from provider | `backend/advisor.py:314-383` | exists; SSE parse, model fallback, errors before first chunk |
-| Market data for grounding | `backend/advisor.py:185-207` | exists; live API (MySQL) preferred, JSON snapshot fallback, `source` marked |
-| Compact context builder | `backend/advisor.py:210-233` | exists; KPIs, brands, products, segments, aspects, keywords, reviews, mentions |
-| Recommendation engine | `backend/advisor.py:448-482`, `server.py:100-113` | exists; 13 cards, 4 categories, 600 s cache |
-| `POST /ai/advice` (non-streaming) | `backend/server.py:144-150` | exists; used by `askMarketingAdvisor` (`api.js:171-180`) — **no caller in `src/`** (UNVERIFIED: grep found none) |
-| DB tables | `backend/database/models.py:18,62,77,106,122` | `products`, `price_history`, `reviews`, `trend_metrics`, `llm_cache` |
+| `GET /api/analytics/overview` (`api/analytics.py:46-52`) | kpis, evolution (12 weekly points × 5 brands), mentions (6), topMovers (4), counts | 10 products, 48 reviews, sentiment 76.1, 5 brands |
+| `GET /api/analytics/sentiment` (`:55-121`) | distribution, weekly trend, aspects, keywords (12), 50 newest reviews, total | 48 reviews, 3 sources |
+| `GET /api/analytics/brands` (`:124-136`) | share of voice, mentions, sentiment, health, topics, concerns | 5 brands |
+| `GET /api/analytics/consumer-segments` (`:139-144`) | 5 segments: size, users, spend, loyalty, sensitivity, preferences | 5 segments |
+| `GET /api/analytics/competitors` (`:147-153`) | brands, price differences vs category median, 6-feature matrix, activity | 10 price rows |
+| `GET /api/analytics/recommendations` (`:168-275`) | executive summary + rule-based InsightCards | derived engine + optional LLM |
+| `GET /api/analytics/trends` (`:357-424`) | TrendMetric rows or derived scores | — |
+| `GET /api/analytics/prices?product_id` (`:327-354`) | current/min/max/avg/change | — |
+| `GET /api/marketing/trends` (`api/marketing.py:97-224`) | weekly per brand/source, 3 opportunities, 4 KPIs, source volume | — |
+| `GET /api/products/` (`api/products.py:115-175`) | cards with sentiment, change, interest, pros/cons | 10 products |
+| `GET /api/products/compare?ids` (`:178-219`) | 2–4 cards | — |
+| `GET /api/products/{id}` (`:222-319`) | card + price history + linear forecast + 20 reviews + review summary | — |
+| `GET /api/products/{id}/prices`, `/reviews` (`:468-493`) | raw rows | — |
 
-### 2.3 What does **not** exist — the real gap
+**Derivations available as Python functions** (`backend/services/analytics_service.py`): sentiment 0-100
+(`:100-118`), price change (`:120-130`), interest (`:132-139`), aspect breakdown (`:141-167`), pros/cons
+(`:169-187`), brand stats (`:204-269`), evolution series (`:271-314`), keyword cloud (`:316-350`), sentiment
+trend (`:352-386`), distribution (`:388-400`), consumer segments (`:406-485`), competitor dashboard (`:491-568`),
+marketing trends (`:574-614`), source volume (`:616-623`), rule-based recommendations (`:629-780`), overview
+(`:786-891`). Price forecasting is linear regression over stored points (`services/forecasting.py:57-105`).
 
-1. **No orchestrator.** "Intent" is a keyword table (`assistant.py:53-60`). There is no tool selection, no multi-step plan, no ability to ask the analytics engine for a computation the prompt did not already contain. The user's §3 architecture (AI Orchestrator → Analytics Engine / Marketing Engine / Data Retrieval / Consumer Intelligence → Grounded Response) has no counterpart in code.
-2. **No Marketing Strategy Generator.** The `campaign` intent (`assistant.py:27-28`) asks for "one campaign: concept, key message, target segment, channels, week-by-week timeline, budget split and KPIs". The user's module A requires **ten** components: Market Research, Target Audience, Segmentation, Positioning, SWOT, Marketing Mix (4P), Campaign Strategy, Budget Allocation, KPIs, Timeline — plus an explicit "why this strategy and which data supports it".
-3. **No Consumer Intelligence module.** `build_context` (`advisor.py:221`) passes `consumerSegments` as raw JSON; there is no preference extraction, no complaint clustering, no cross-category comparison, no "why Apple over Samsung" analysis grounded in reviews.
-4. **No Competitor Intelligence module.** The `competitor` intent (`assistant.py:33-35`) asks for a table + strengths/weaknesses. There is no positioning map, no price-gap analysis, no review-derived weakness extraction, no differentiation-opportunity output.
-5. **No Campaign & Content Generator beyond one campaign.** `copy` (`:31-32`) gives 8 copy options; `calendar` (`:29-30`) gives a table. There are no campaign *ideas* ranked, no influencer proposals, no retention campaigns, no structured objective/audience/message/channel/budget/calendar/KPI block.
-6. **No advanced features.** Opportunity Detection, Predictive Insights, Automated SWOT, Persona Generator, KPI Advisor, What-if — none exist as code paths. (The dashboard's `/api/analytics/recommendations` is a different, card-based feature.)
-7. **Chart Intelligence is page-scoped and shallow.** Only charts mounted on the current page register (`ChatContext.jsx:49-53`). The assistant cannot answer "compare this month's sentiment chart with the one on the brands page", cannot see a chart the user is not looking at, and cannot fetch a series the page did not render. The user explicitly asks for chart ID + indicator + time range + actual data + filters — the first two and the last are absent from `ChatRequest` (`server.py:116-122` has `charts[]` and `filters`, no indicator/range contract).
-8. **No conversation persistence.** `messages` is `useState` (`AssistantChat.jsx:77`); reload or route change loses everything. "New conversation" is the only lifecycle control.
-9. **No platform control.** The assistant cannot navigate, open a drawer, apply a filter, switch a tab, or focus a chart. `askAssistant` exists but is only invoked by the user clicking "Analyse".
-10. **Streaming is correct but the render is not fluid.** See §2.4.
-11. **No tests.** `grep -rn "assistant\|/ai/chat" backend/tests/*.py` returned **zero matches** (CONFIRMED). The whole assistant stack — `assistant.py`, `advisor.stream_chat`, `/ai/chat` — is untested by the gate.
-12. **Small model.** `/health` reports `dots-studio/dots-3-note-preview:free` (CONFIRMED via `GET 127.0.0.1:8020/health`). Free-tier, rate-limited, and weak at arithmetic — which is exactly why `chart_facts` pre-computes numbers. Any reasoning-heavy module (strategy, SWOT, what-if) will need a stronger model or a deterministic pre-computation layer.
+**Scale matters for the architecture:** 10 products, 48 reviews, 5 brands, 3 sources. The entire dataset fits
+in a prompt many times over. This is not a retrieval problem today — see §4.6.
 
-### 2.4 Streaming: what is missing for "frumos formatat" — CONFIRMED
+### 2.3 Gap analysis per module (each gap with `file:line`)
 
-The transport is already token-streaming. The **render** is the problem:
+#### A. Marketing Strategy Generator — **does not exist**
 
-- `AssistantChat.jsx:34-70` re-parses the **entire accumulated string** on every chunk, and React re-renders the whole message subtree. Cost is O(n²) in answer length and the DOM is rebuilt each token. No memoisation, no incremental block parsing.
-- No typing cursor. `chat-typing` (`:878-881`) only covers the *pre-first-token* state; once text arrives there is no visual "still writing" affordance.
-- `inline()` (`:25-32`) handles `**bold**`, `` `code` ``, `*em*`, `_em_`. It does **not** handle links `[text](url)`, strikethrough, or nested emphasis.
-- `Markdown()` (`:34-70`) handles `#`–`####` (all rendered as `<h4>`), tables, ordered/unordered lists with **one** nesting level, and paragraphs. It does **not** handle fenced code blocks ```` ``` ````, blockquotes, horizontal rules, or links. A model that emits a code block or a link shows raw backticks/URLs.
-- Tables render only when the row matches `/^\s*\|.*\|\s*$/`; a table whose first row is still streaming is shown as paragraphs until the closing pipe arrives, then snaps into a table (visible layout jump).
-- There is no "copy answer" control, no token/latency indicator, no error affordance beyond a red bubble.
-- `onText` receives the **full text so far** (`api.js:166`), which forces the O(n²) re-parse. A delta callback would allow append-only rendering.
+| Required section | What exists | Gap |
+|---|---|---|
+| Market research | `overview` KPIs, `evolution_series`, `marketing_trends` | No demand/market-size data at all; must be framed as "what the platform observes", not market research |
+| Target audience | `consumer_segments` (`analytics_service.py:406-485`) | Segment definitions are **rule-assigned by aspect membership** (`:429-444`), not survey clusters; the assistant must say so |
+| Segmentation | same | No demographic or behavioural dimensions beyond aspects and price |
+| Positioning | `competitor_dashboard` (`:491-568`) price vs category median | No perceptual map input beyond aspect scores |
+| SWOT | nothing | No generator anywhere |
+| Marketing mix 4P | product cards (price, specs, pros/cons), `source_volume` | "Place" has no channel data; "Promotion" has no spend data |
+| Campaign strategy | `campaign` intent prompt (`assistant.py:27-28`) | Free-form paragraph; no structure, no data references |
+| Budget allocation | nothing | No spend data; only a declared allocation model is honest |
+| KPIs | nothing | No campaign metrics exist (see §2.7) |
+| Timeline | `calendar` intent (`assistant.py:29-30`) | Content calendar only, no strategy timeline |
+| "Why + which data" | `assistant.py:199` ("quote numbers exactly") | No per-section evidence requirement, no citation mechanism |
 
-### 2.5 UI placement — CONFIRMED
+#### B. Chart Intelligence — **partially exists, 4 of 7 sub-questions missing**
 
-- Launcher: fixed `right:24px; bottom:24px` (`styles:835`), panel `right:24px; bottom:24px; width:min(440px,…); height:min(680px,…)` (`:838`).
-- Mobile: full-screen panel (`:892`).
-- There is **no** docked/permanent variant, no pin control, no resize. The user wants the overlay **kept** and a permanent right-hand panel **considered** — these are additive, not exclusive.
+| Requirement | Status | Evidence |
+|---|---|---|
+| 1. What the chart represents | Partial | Only `title`, `subtitle`, `note` (`assistant.py:136-140`); no metric definition (e.g. what "indexed to 100" means) |
+| 2. Overall trend | **Yes** | `chart_facts` first→last + % change (`:90-109`) |
+| 3. Max/min | **Yes** | peak/low per series (`:97-99`) |
+| 4. Unusual fluctuations | **No** | No z-score, no change-point, no outlier flag anywhere in the repo |
+| 5. Factors that explain the evolution | **No** | No correlation, no cross-series join, no price↔sentiment linkage |
+| 6. Marketing implications | Prompt only | `assistant.py:25-26` |
+| 7. Actions | Prompt only | `assistant.py:25-26` |
+| "Why did positive sentiment drop?" | **No** | Needs per-week aspect deltas; `sentiment_trend` (`analytics_service.py:352-386`) returns only positive/neutral/negative shares |
+| "Which brand has the best perception?" | Partial | `brand_stats` has it, but in focus mode the market snapshot is **deliberately omitted** (`assistant.py:204`) |
+| "Which product has the most negative reviews?" | **No** | No ranked negative-review aggregate exists |
+| "How do price and rating correlate?" | **No** | No correlation function |
+| "What trends in the last 30 days?" | **No** | The `range` filter is UI-only — see §2.7 |
+| Real data, not an image | **Yes** | Rows are sent (`ChatContext.jsx:46-55`, `assistant.py:133-145`) |
+| Silent truncation | Risk | `MAX_CHART_ROWS=40` / `MAX_CHART_CHARS=7000` (`assistant.py:18-20`) drop rows without telling the model |
 
-## 3. Every module the change would touch (file:line, each read)
+#### C. Consumer Intelligence — **data exists, evidence assembly does not**
 
-**Frontend**
-- `src/components/AssistantChat.jsx` — panel, renderer, send/stop/reset, quick actions. Largest change surface.
-- `src/context/ChatContext.jsx` — chart store; needs to grow into a **page-context + action bus** (register page state, expose `navigate`, `setFilter`, `openDrawer`, `setTab`).
-- `src/services/api.js` — `streamAssistantChat` (`:148-169`) needs delta streaming + an action/event channel; `AI_API_URL` (`:145`).
-- `src/context/AppContext.jsx` — filters (`useFilters`) are the target of "apply a filter" actions.
-- `src/components/Layout.jsx` — host for a docked panel variant and for the action dispatcher.
-- `src/pages/*.jsx` — each page must publish a **page descriptor** (what tabs/drawers/filters it has) so the assistant can act on it. Product drawer state lives in `ProductAnalysis.jsx`; tab state in `AIRecommendations.jsx`.
-- `src/styles/*.css` — `:835-895` assistant block; docked layout, cursor, code blocks, action chips.
+| Requirement | Status | Gap |
+|---|---|---|
+| Preferences | Partial | `preferences` per segment (`analytics_service.py:464-469`) is the segment description + top-2 aspects |
+| Segmentation | **Yes** | `consumer_segments` (`:406-485`) |
+| Purchase drivers | Partial | Aspect scores only (`:141-167`); no weighting, no stated influence |
+| Recurring complaints | Partial | `pros_cons` (`:169-187`) and `concerns` (`:251-255`) at brand level only |
+| Liked features | **Yes** | `pros` (`:169-187`) |
+| Compare preferences between segments | **No** | No per-segment aspect breakdown exposed; `aspect_breakdown(group)` is computed inside the segment loop (`:465`) but not returned |
+| "Why Apple over Samsung?" | **No** | No head-to-head review retrieval by brand pair |
 
-**Backend**
-- `backend/server.py` — `ChatRequest`/`/ai/chat`; add `actions`, `page.descriptor`, `conversationId`; possibly a new `/ai/action` result channel.
-- `backend/assistant.py` — replace keyword intents with an **orchestrator** (tool selection + plan), add module prompts, add evidence collection.
-- `backend/advisor.py` — `stream_chat` (`:314-383`) stays; add a non-streaming `chat` JSON mode call for the orchestrator's planning step (`chat(..., json_mode=True)` already exists at `:244`).
-- `backend/services/analytics_service.py`, `recommendations.py`, `forecasting.py` — the Analytics/Marketing engines the orchestrator calls.
-- `backend/api/analytics.py`, `marketing.py`, `products.py` — the Data Retrieval tools (already exist; the orchestrator should call the **service layer**, not HTTP).
-- `backend/database/models.py` — `LLMCache` (`:122`) can cache expensive orchestrations; conversation persistence would need a new table **only if** Q8 says server-side.
+#### D. Competitor Intelligence — **data exists, narrative does not**
 
-**Tests**
-- `backend/tests/` — no assistant coverage today; new tests for orchestrator routing, evidence grounding, "not enough data", action validation.
-- `e2e/pages.spec.js` — add assistant flows (open, ask, stream, stop, new conversation, action chip).
+| Requirement | Status | Gap |
+|---|---|---|
+| Positioning | Partial | Price vs category median (`:502-522`), aspect matrix (`:526-541`) |
+| Price differences | **Yes** | `priceDifferences` (`:510-522`) |
+| Consumer perception | **Yes** | sentiment + health per brand (`:232-266`) |
+| Competitive advantages | Partial | `topics` (`:247-250`) |
+| Weaknesses from reviews | Partial | `concerns` (`:251-255`) |
+| Differentiation opportunities | **No** | No generator; `_derived_opportunities` (`api/marketing.py:23-82`) is market-level, not brand-pair |
+| Marketing-strategy comparison | **No** | No channel/spend/campaign data exists |
 
-## 4. The requirements, verbatim and mapped
+#### E. Campaign & Content Generator — **prompt formats only**
 
-### 4.1 The five modules (user's table, verbatim)
+| Requirement | Status | Gap |
+|---|---|---|
+| Campaign ideas | Prompt | `campaign` intent (`assistant.py:27-28`) |
+| Ad messages / slogans | Prompt | `copy` intent (`:31-32`) |
+| Social content | Prompt | same |
+| Editorial calendar | Prompt | `calendar` intent (`:29-30`), Markdown table |
+| Influencer proposals | **No** | No influencer data anywhere |
+| Launch campaigns | Prompt | same as campaign |
+| Loyalty campaigns | **No** | No retention/loyalty data (the segment `loyalty` field is a sentiment score, `analytics_service.py:480`) |
+| Budget / KPI targets | **No** | No campaign metrics |
 
-| Module | User's requirement | Exists today | Gap |
+### 2.4 Advanced features (all six)
+
+| # | Feature | Today | What is missing |
 |---|---|---|---|
-| **A. Marketing Strategy Generator** | "strategie completă de marketing pentru un anumit produs sau brand", with Market Research, Target Audience, Segmentation, Positioning, SWOT, Marketing Mix, Campaign Strategy, Budget Allocation, KPIs, Timeline, **and** "trebuie să explice de ce recomandă o anumită strategie și ce date susțin recomandarea" | one `campaign` intent prompt (`assistant.py:27-28`) | 9 of 10 components; no justification-with-data contract |
-| **B. Chart Intelligence** | explain: what it shows, trend, max/min, anomalies, plausible causes, marketing implications, actions; answer "de ce a scăzut sentimentul", "care brand are cea mai bună percepție", "ce produs are cele mai multe recenzii negative", "cum se corelează prețul cu ratingul", "ce tendințe în ultimele 30 de zile"; **must receive the real data, not an image** | `chart_facts` + focused-chart raw data (`assistant.py:75-163`); real data already sent, not an image | cross-page/cross-chart queries; anomaly detection; correlation; time-range contract; chart ID + indicator in the request |
-| **C. Consumer Intelligence** | preferences, segmentation, purchase drivers, recurring complaints, appreciated features, cross-category comparison; e.g. "de ce preferă Apple în detrimentul Samsung", grouped by ecosystem/design/performance/price/UX | segments passed as raw JSON (`advisor.py:221`); `sentiment` intent gives drivers | no review-derived clustering, no cross-brand preference extraction, no category grouping |
-| **D. Competitor Intelligence** | positioning, price differences, consumer perception, competitive advantages, weaknesses from reviews, differentiation opportunities | `competitor` intent prompt (`assistant.py:33-35`) | no positioning map, no price-gap computation, no weakness extraction from reviews |
-| **E. Campaign & Content Generator** | campaign ideas, ad messages, slogans, social content, editorial calendar, influencer proposals, launch campaigns, retention campaigns; structured objective/audience/message/channels/budget/calendar/KPI | `copy` and `calendar` intents (`:29-32`) | no ranked ideas, no influencer proposals, no retention, no structured block |
+| 1 | Marketing Opportunity Detection | `_derived_opportunities` (`api/marketing.py:23-82`) → 3 cards; `recommendations` (`analytics_service.py:629-780`) → rule signals | Not conversational; no ranking by expected impact; no product-level opportunities; no "why now" |
+| 2 | Predictive Insights | `forecast_next_period` (`forecasting.py:57-105`), used only for the product drawer (`api/products.py:266-275`) | No uncertainty band, no sentiment forecast, no explicit "estimate, not certainty" labelling in chat |
+| 3 | Automated SWOT | Nothing | Generator + evidence mapping (S/W from aspects, O/T from competitor gaps) |
+| 4 | Customer Persona Generator | Segments only (`analytics_service.py:406-485`) | Persona synthesis from segment + review language; **no demographics exist** |
+| 5 | Marketing KPI Advisor | Nothing | KPI catalogue + measurement plan; **no CTR/CAC/ROAS data exists** (§2.7) |
+| 6 | What-if Analysis | Nothing | Arithmetic scenario engine + explicit assumptions; no elasticity data |
 
-### 4.2 The six advanced features (verbatim names)
+### 2.5 UI and streaming — what exists, what is missing
 
-1. **Marketing Opportunity Detection** — from reviews, online interest, competitor differences. *Nothing exists.*
-2. **Predictive Marketing Insights** — estimates only "dacă există suficiente date istorice", never presented as certainty. *`backend/services/forecasting.py` exists (UNVERIFIED: not read in this pass); no chat integration.*
-3. **Automated SWOT Analysis** — for a brand or product, from collected data. *Nothing exists.*
-4. **Customer Persona Generator** — from statistically identified segments. *Segments exist (`/api/analytics/consumer-segments`); no persona generation.*
-5. **Marketing KPI Advisor** — CTR, Conversion Rate, CAC, ROAS, Engagement Rate, Customer Retention Rate per objective. *Nothing exists.*
-6. **What-if Analysis** — e.g. "ce s-ar întâmpla dacă am reduce prețul cu 10%", using history or explicit assumptions, never claiming certainty. *Nothing exists.*
+**Panel today** (`src/styles/global.css:835-893`): launcher bottom-right (`:835`), panel
+`position: fixed; right: 24px; bottom: 24px; width: min(440px, calc(100vw - 32px)); height: min(680px, calc(100vh - 48px))`
+(`:838`), full-screen under 760px (`:891-893`). Open state lives in `ChatContext.jsx:23`; Escape closes it
+(`AssistantChat.jsx:88-93`). It is **not** permanent and does not survive a reload.
 
-### 4.3 The architecture and technology the user proposed (verbatim)
+**Markdown renderer** (`AssistantChat.jsx:25-70`):
+- supported: `#`–`####` headings (all rendered as `<h4>`), pipe tables with a separator row, ordered and
+  unordered lists with **one** nesting level, inline `**bold**`, `*italic*`, `_italic_`, `` `code` ``;
+- **missing**: fenced code blocks (` ``` `), links `[text](url)`, blockquotes, horizontal rules, images,
+  tables without a header row, escaped pipes, multi-level nesting, task lists.
 
-Architecture components: **MarketPulse AI Assistant** (conversational UI) → **AI Orchestrator** (understands the question, selects tools) → **Analytics Engine** (statistics, charts, indicators) / **Marketing Engine** (strategies, campaigns, SWOT) / **Data Retrieval** (products, reviews, prices) / **Consumer Intelligence** (segments, preferences) → **Grounded AI Response** (explanations, recommendations, indicators, sources).
+**Streaming path** (`api.js:148-169` → `AssistantChat.jsx:111`):
+- the server **is** incremental (`advisor.py:375-377` yields per delta);
+- the client accumulates and calls `onText(fullText)` on **every** chunk (`api.js:160-167`);
+- React then re-renders and **re-parses the entire Markdown tree** on every chunk (`AssistantChat.jsx:148`),
+  which is O(n²) work for a long strategy answer;
+- there is a "thinking" dots indicator (`AssistantChat.jsx:147`) but **no typing cursor**, no throttle, no
+  incremental block parsing;
+- auto-scroll fires on every message change (`:87`), so a user scrolling up is yanked back down.
 
-Technology table: AI Orchestrator = Python; API = FastAPI; LLM = OpenAI API or compatible; Data Analysis = Pandas, NumPy; ML = Scikit-learn; NLP = Transformers; Database = PostgreSQL; Context retrieval = SQL + eventual RAG; Frontend Chat = React.
+**Nothing else exists**: no conversation persistence (`messages` is `useState([])`, `AssistantChat.jsx:77`),
+no citations, no actions, no copy button, no token/usage display, no error taxonomy beyond a red bubble.
 
-**Repo reality check (CONFIRMED):** Python + FastAPI + React already match. The database is **MySQL**, not PostgreSQL (`backend/requirements.txt`: PyMySQL; `docker-compose.yml`; `/health` → `mysql+pymysql`). Pandas, NumPy and Scikit-learn were **deliberately removed** — `backend/requirements.txt` states: "pandas / numpy / scikit-learn were removed: nothing imports them"; `praw / textblob` likewise. Transformers is not installed. So the technology table is a **wish list**, not a constraint; see Q6.
+### 2.6 Grounding defect found during this investigation (CONFIRMED, with the numbers)
 
-### 4.4 Chart interpretation flow (user's spec)
+This is the most important finding for the new architecture.
 
-Frontend sends: chart ID, indicator analysed, time range, actual data, applied filters. Backend forwards to the AI service, which may request additional computations, and returns the interpretation.
+- The **dashboard** reads live MySQL: `GET /api/analytics/overview` returned `10` products, `48` reviews,
+  sentiment `76.1`; `GET /api/analytics/consumer-segments` returned Value optimizers `37.5%`, sensitivity `0.0`.
+- The **assistant** answered `GET http://127.0.0.1:8020/analytics/recommendations?category=Marketing` with
+  *"Value optimizers represent 24% of the market with high price sensitivity (82)"*.
+- `24%` and `82` are exactly the values in `backend/market_data.json` (snapshot segments:
+  `Performance seekers 28%/34, Value optimizers 24%/82, …`), **not** the live values.
+- Mechanism: `advisor.load_market_data()` (`advisor.py:185-207`) falls back to the snapshot on any exception
+  and only logs a warning (`:133`). The response carries `source: "snapshot"`, but nothing in the prompt or the
+  UI surfaces it, so the user cannot tell which source answered.
+- Second, independent defect in the same path: the live dict (`advisor.py:136-182`) has **no**
+  `exampleRecommendations` key, but `get_recommendations` indexes it unconditionally (`advisor.py:451`). A
+  *successful* live fetch would therefore raise `KeyError`. Both branches are wrong; the endpoint is not used
+  by the frontend (the page calls the main API's `/api/analytics/recommendations`).
 
-**Today:** `ChatRequest` (`server.py:116-122`) carries `charts[]` (each `{id,title,subtitle,data,note}`), `focusChart`, `page{path,title,filters}` and `brand`. It does **not** carry an explicit `indicator` or `range` field per chart, and there is no channel for the model to *request* more computation. The data is real (not an image) — that half of the requirement is already met.
+Consequence for this feature: **grounding must be explicit and visible**. Every answer must carry which
+source produced each number, and a fallback must be a labelled degradation, not a silent substitution.
 
-### 4.5 UI repositioning (user's spec)
+### 2.7 What the platform does NOT have (hard constraints on honest answers)
 
-- Keep the floating "Ask AI" button + overlay — **explicitly requested** ("o vom păstra").
-- Consider a permanent right-hand panel, top-to-bottom.
-- The assistant should be able to "interacționa direct cu platforma și a o și controla: arată tab-uri, ajută, explică full, să poată controla tot".
+These are not bugs to fix in this feature; they are facts the assistant must respect and state.
 
-**Today:** overlay only; no dock; no control of any kind.
+| Missing input | Consequence |
+|---|---|
+| Impressions, clicks, conversions, campaign spend | **CTR, Conversion Rate, CAC, ROAS cannot be computed.** Only "recommended KPI + how to measure it" is honest. |
+| Demographics (age, gender, income, location) | Personas can only be inferred from review language; must be labelled as inferred. |
+| Market size / TAM / growth rates | "Market research" is limited to what the platform observes. |
+| Competitor spend / channel mix | No marketing-strategy comparison between brands. |
+| Influencer data | Influencer proposals are creative suggestions, not data-backed. |
+| Price elasticity / demand curve | What-if is an arithmetic scenario with stated assumptions, not a prediction. |
+| A working date-range filter | `filters.range` exists in `AppContext.jsx:4` and `FilterBar.jsx:15`, but **no API call passes it** (`api.js:53-61` only forwards brand/source/category; the backend has no `range` parameter). "Last 30 days" cannot be answered today. |
+| Source filter beyond sentiment | `filters.source` reaches only `/api/analytics/sentiment` (`api.js:102-106`); `/brands`, `/overview`, `/consumer-segments`, `/competitors` ignore it. |
+| Any campaign or conversion event | Every KPI in §2.4 #5 is a recommendation, never a measurement. |
 
-### 4.6 Streaming (user's supplement)
+### 2.8 Operational facts (CONFIRMED)
 
-"vom vrea să vedem output cu streaming în agent frumos formatat." Transport exists; render needs work (§2.4).
+- The three services are up right now: main API `8010` (`{"status":"online","database":"healthy","llm":"configured"}`),
+  assistant `8020` (`{"ok":true,"provider":"openrouter","key_configured":true}`), frontend `5173` (HTTP 200).
+- The assistant service process started at `2026-11-07 17:38:05`, i.e. **after** `advisor.py` was last modified
+  (17:31), so it is running the current code.
+- **The launcher does not start the assistant.** `scripts/start.ps1:117-118` starts only `main:app`;
+  `run.ps1` only reads `VITE_AI_API_URL` (`:203`). The setup scripts ask for the assistant port
+  (`scripts/setup.ps1:311`, `settings.ps1:277`) but nothing launches it. A user who runs `run.ps1` gets a
+  dashboard whose "Ask AI" button fails with "Cannot reach the AI backend".
+- **No assistant tests exist.** `backend/tests/` has no file mentioning `assistant` or `advisor`;
+  `e2e/` has no test mentioning the assistant, "Ask AI" or `/ai/chat`.
+
+---
+
+## 3. Every module the change would touch (each read)
+
+### 3.1 Backend — existing files
+
+| File | Lines that matter | Why it is touched |
+|---|---|---|
+| `backend/assistant.py` | `:22-43` intents, `:45-50` prompt, `:53-60` detection, `:75-120` facts, `:148-163` chart block, `:190-214` assembly, `:217-228` stream | Becomes the *prompt/format* layer behind the orchestrator; intent detection is replaced by planning |
+| `backend/advisor.py` | `:33-59` providers, `:117-182` live fetch, `:185-207` fallback, `:210-233` context, `:314-383` stream, `:448-480` recommendations | Provider + streaming stay; `load_market_data`/`build_context` are replaced by tools; `:451` must be fixed or removed |
+| `backend/server.py` | `:100-150` routes | Either mounted into `main.py` or kept as a compatibility shim |
+| `backend/main.py` | `:60-64` routers | Include the new AI router so one process serves everything |
+| `backend/config.py` | `:50-68` OpenRouter, `:72-75` AI provider | New settings (fast model, deep model, tool budget, guard on/off) |
+| `backend/services/analytics_service.py` | `:100-891` | Add: correlation, anomaly flags, ranked negative reviews, per-segment aspects, per-week aspect deltas |
+| `backend/services/forecasting.py` | `:57-105` | Add residual/uncertainty band for predictive insights |
+| `backend/services/llm_service.py` | `:170-270` `complete()` | Reused for non-streaming structured calls (SWOT, personas) with the existing cache |
+| `backend/api/analytics.py` | `:46-424` | New endpoints for the computations above |
+| `backend/api/marketing.py` | `:23-82` opportunities | Reused as an opportunity source |
+| `backend/api/products.py` | `:115-319` | Reused for product detail and evidence |
+
+### 3.2 Backend — new files (proposed)
+
+| File | Purpose |
+|---|---|
+| `backend/ai/orchestrator.py` | Intent → plan → tools → facts → prompt → stream; the only place that decides what to call |
+| `backend/ai/tools.py` | The tool registry: one function per capability, each returning `{data, source, coverage}` |
+| `backend/ai/marketing_engine.py` | Pure functions: SWOT, 4P skeleton, budget split, KPI plan, persona synthesis, what-if arithmetic |
+| `backend/ai/prompts.py` | One template per module (strategy, chart, consumer, competitor, campaign), each demanding evidence per section |
+| `backend/ai/guard.py` | Number audit, missing-data policy, action extraction, citation assembly |
+| `backend/api/ai.py` | `POST /api/ai/chat` (SSE), `GET /api/ai/capabilities`, `GET /api/ai/health` |
+
+### 3.3 Frontend — existing files
+
+| File | Lines | Why it is touched |
+|---|---|---|
+| `src/components/AssistantChat.jsx` | `:25-70` renderer, `:73-157` panel | Permanent layout, streaming cursor, code blocks, links, citations, action buttons, persistence |
+| `src/context/ChatContext.jsx` | `:5-16` store, `:21-32` provider, `:46-61` registration | Add UI command bus + conversation persistence; keep the chart store byte-compatible |
+| `src/context/AppContext.jsx` | `:4` filters, `:15-17` updateFilter | Expose filters to the assistant's action runner |
+| `src/services/api.js` | `:145-169` stream, `:171-180` advice | New SSE parser; keep `streamAssistantChat` signature or migrate callers |
+| `src/components/Layout.jsx` | `:115` mount | Panel layout: main column offset, persistent panel, keep launcher |
+| `src/styles/global.css` | `:835-893` | Panel geometry, cursor, citations, action chips, mobile behaviour |
+| `src/components/common.jsx` | `:36-41` ChartCard | Keep `data` registration; add chart id/definition metadata |
+| `src/pages/*.jsx` | local state (see §3.4) | Register controllable state for the action runner |
+| `e2e/pages.spec.js`, `e2e/smoke.spec.js` | — | New tests for the panel, streaming, actions |
+| `backend/tests/test_api.py` | — | Contract tests for the new endpoints |
+
+### 3.4 Page-level state that a controlling assistant would need (each read)
+
+| Page | State | Line |
+|---|---|---|
+| `MarketOverview.jsx` | none (global filters only) | — |
+| `ProductAnalysis.jsx` | `sortKey`, `sortDirection`, `category`, `selectedId` (drawer), `compareIds`, `tableQuery` | `:14-19` |
+| `BrandIntelligence.jsx` | `selectedBrands`, `focusBrand` | `:12-13` |
+| `SentimentAnalysis.jsx` | `page`, `sentimentFilter` | `:14-15` |
+| `ConsumerInsights.jsx` | `activeSegment` | `:16` |
+| `MarketingAnalytics.jsx` | `activeMetric` | `:16` |
+| `CompetitorAnalysis.jsx` | none | — |
+| `AIRecommendations.jsx` | `category` | `:12` |
+
+All of it is **local `useState`**, unreachable from outside the page. Global state is only
+`filters` + `theme` (`AppContext.jsx:7-8`) and the chart store (`ChatContext.jsx:5-16`).
+
+---
+
+## 4. Options, with evidence
+
+### 4.1 Where the orchestrator lives
+
+| Option | What changes | Evidence / trade-off |
+|---|---|---|
+| **A. Keep two services** | Add tools to `server.py` that call the main API over HTTP | The hop already exists and already fails silently (`advisor.py:133`); two processes, two ports, and the launcher starts neither the second one nor its `VITE_AI_API_URL` |
+| **B. Mount into `main.py`** | New `api/ai.py` router; tools use SQLAlchemy directly | One process, one port, real transactions, no snapshot fallback, the launcher already runs it (`scripts/start.ps1:117`) |
+| **C. Hybrid** | Router in `main.py`; `server.py` re-exports the same app for compatibility | Same as B, plus nothing breaks for anyone starting `server:app` |
+
+**Recommendation: C.** It removes the silent-fallback class of bug by construction and makes the assistant
+start with the app the user already runs.
+
+### 4.2 How the model gets data
+
+| Option | How | Trade-off |
+|---|---|---|
+| A. Prompt stuffing (today) | One prompt with the whole context | Works at 48 reviews; no freshness guarantee; grows without bound |
+| B. Native function calling | Model emits tool calls, loop until done | Needs provider support; free models vary; each round trip costs latency and tokens |
+| C. Deterministic planner | Rules pick 2–6 tools, one LLM call writes the answer | Fast, cheap, predictable, testable; less open-ended |
+| D. Hybrid | Planner for the 5 modules; function calling for open questions | Best of both; more code |
+
+**Recommendation: D, delivered as C first.** The planner is what makes the five modules reliable; function
+calling is an opt-in later. Reason: the configured free model is a reasoning model whose tool support cannot be
+assumed, and a failed tool loop is a 30-second dead end for the user.
+
+### 4.3 How the assistant controls the UI
+
+| Option | Mechanism | Trade-off |
+|---|---|---|
+| A. URL only | `navigate(path)` via React Router | Safe, tiny, no page changes; cannot open a drawer or select a segment |
+| B. Full command bus | Pages register handlers; assistant dispatches | Maximum control; touches all 8 pages; risk of acting on stale state |
+| C. Declarative actions | Response carries a typed action list; one runner executes a fixed vocabulary | Auditable, testable, no page coupling until a page opts in |
+
+**Recommendation: C, phased.** Phase 1 vocabulary: `navigate`, `set_filter`, `highlight_chart` (no page
+changes). Phase 2: `open_product`, `select_segment`, `set_page_tab` (each page registers a handler). Destructive
+actions are never in the vocabulary.
+
+### 4.4 Streaming protocol
+
+| Option | Trade-off |
+|---|---|
+| A. `text/plain` (today) | Simplest; cannot carry actions, citations or coverage |
+| B. SSE with typed events | One connection, named events, works with the existing `getReader()` loop; needs a small parser |
+| C. NDJSON | Same as B but a non-standard content type for this use |
+
+**Recommendation: B.** Events: `meta`, `token`, `action`, `citation`, `done`, `error`. Keep `text/plain`
+behind `?format=text` for one release so nothing breaks.
+
+### 4.5 Model and latency
+
+- The configured model is `dots-studio/dots-3-note-preview:free` with `reasoning.effort=high`
+  (`config.py:53`, `:66`). The project's own notes record a reasoning model taking 15–100 s and a 50-second
+  endpoint looking broken (WORKING-NOTES IX.4).
+- A permanent panel makes latency **visible on every question**, not just on a page load.
+
+| Option | Trade-off |
+|---|---|
+| A. One model, progress state | Simplest; every chart question waits for a reasoning model |
+| B. Two-tier | Fast model for chart/consumer/competitor Q&A; deep model for strategy/SWOT/what-if, behind a visible "Deep analysis" toggle |
+| C. Fast model everywhere | Cheapest latency; weakest strategy output |
+
+**Recommendation: B**, with the tier printed in the message header so the user knows which answered.
+
+### 4.6 RAG or SQL
+
+At 10 products / 48 reviews, the whole corpus is smaller than a single prompt. A vector store would add a
+dependency, an index to keep fresh, and a new failure mode for zero retrieval benefit.
+
+**Recommendation: SQL now.** Add `search_reviews(query, brand, aspect, limit)` using SQL `LIKE` + the existing
+stopword list (`analytics_service.py:48-62`). Revisit embeddings only when review volume makes prompt stuffing
+impossible; the tool interface makes that a drop-in change later.
+
+### 4.7 Conversation persistence
+
+| Option | Trade-off |
+|---|---|
+| A. None (today) | A reload loses everything |
+| B. `localStorage` | No schema change, survives reload, per-browser |
+| C. DB table | Survives devices; needs a migration, a user identity, and a retention policy |
+
+**Recommendation: B now, C only if the user asks for cross-device history.**
+
+### 4.8 Technology table reconciliation
+
+The user's table lists PostgreSQL, Pandas, NumPy, Scikit-learn, Transformers, "OpenAI API". The project's
+standing decisions (WORKING-NOTES I.7) are **MySQL** and **OpenRouter**. Reconciliation:
+
+- **Database stays MySQL.** Switching would contradict a standing decision and gains nothing at this size.
+- **LLM stays OpenRouter** (free tier, 1000 RPD). "OpenAI-compatible" is already true: `advisor.py` speaks the
+  OpenAI chat API to four providers.
+- **Pandas / NumPy / Scikit-learn / Transformers: not needed.** Every computation in §2.2 is 5–50 lines of
+  plain Python over lists; the repo deliberately removed pandas/numpy/scikit-learn because nothing imported
+  them (`backend/requirements.txt:36`). Adding them back for `mean` and `sorted` is weight without capability.
+- **RAG: not now** (§4.6).
+
+---
 
 ## 5. Recommendation (precise)
 
-### 5.1 Architecture — the orchestrator, built from what exists
-
-Do **not** throw away `assistant.py`. Wrap it:
+### 5.1 Target architecture
 
 ```
-POST /ai/chat
-  └─ orchestrator.plan(message, page, charts, brand, history)
-       ├─ step 0: deterministic intent+entity parse (extend assistant.detect_intent)
-       ├─ step 1: tool selection (JSON mode, advisor.chat(json_mode=True))
-       │     tools = [analytics.*, marketing.*, products.*, reviews.*, segments.*,
-       │              competitor.*, forecast.*, strategy.*, swot.*, persona.*, kpi.*, whatif.*]
-       ├─ step 2: execute the selected tools against the SERVICE layer (not HTTP)
-       │     each returns {facts: [...], evidence: [{label, value, source, path}]}
-       ├─ step 3: build the prompt from tool facts (never raw rows when facts exist)
-       └─ step 4: stream the grounded answer + emit an `evidence` event
+Browser (React)
+  AssistantChat — permanent right panel, launcher kept
+    sends : message, history, page{path,title,filters}, charts[], focusChart, uiState
+    reads : SSE  meta | token | action | citation | done | error
+        │
+        ▼
+FastAPI — main.py, port 8010 (one process)
+  POST /api/ai/chat  (text/event-stream)
+        │
+        ▼
+  AI Orchestrator  (backend/ai/orchestrator.py)
+    1. classify   → module + required tools        (rules; optional LLM router)
+    2. call tools → SQLAlchemy → MySQL             (backend/ai/tools.py)
+    3. engines    → analytics / marketing / consumer / competitor
+    4. facts      → exact numbers + source + coverage per field
+    5. prompt     → module template + facts + page context + gaps
+    6. stream     → advisor.stream_chat (provider-agnostic)
+    7. guard      → number audit, missing-data policy, action extraction
 ```
 
-The orchestrator's planning call is **non-streaming** and cheap (small JSON); the answer call is the existing `advisor.stream_chat`. If planning fails or returns an unknown tool, fall back to today's behaviour — the chat must never become less reliable than it is now.
+**Why this shape:** it keeps everything that already works (chart rows, pre-computed facts, streaming,
+provider abstraction, OpenRouter key) and adds only the missing layer — a controlled tool surface with
+explicit provenance. Nothing in the current prompt logic is removed; `chart_facts` becomes one tool among many.
 
-**Tools map to the user's engines:**
+### 5.2 Tool catalogue (the implementer's contract)
 
-| User's component | Implementation |
-|---|---|
-| Analytics Engine | `backend/services/analytics_service.py` + `api/analytics.py` computations |
-| Marketing Engine | new `backend/services/strategy.py` (strategy, SWOT, campaign, KPI advisor) |
-| Data Retrieval | `backend/api/products.py`, `database/models.py` (Product, PriceHistory, Review) |
-| Consumer Intelligence | new `backend/services/consumer.py` (segments, drivers, complaints) |
-| Grounded AI Response | `assistant.build_messages` + an `evidence[]` list rendered as chips |
+Every tool returns `{ "data": ..., "source": "table|endpoint", "coverage": {field: "measured|derived|not_collected"} }`.
 
-### 5.2 Module mapping — what each module becomes
+| # | Tool | Input | Returns | Grounding |
+|---|---|---|---|---|
+| 1 | `market_overview` | — | kpis, counts, top movers | `analytics_service.overview` |
+| 2 | `brand_stats` | `brand?` | share, sentiment, health, topics, concerns | `:204-269` |
+| 3 | `list_products` | `brand?, category?, search?` | cards | `api/products.py:115` |
+| 4 | `product_detail` | `id \| name` | card, price history, forecast, reviews | `:222-319` |
+| 5 | `price_history` | `product_id` | points, min/max/avg/change | `forecasting.py:14-55` |
+| 6 | `sentiment` | `brand?, product_id?, source?` | distribution, trend, aspects, keywords | `api/analytics.py:55-121` |
+| 7 | `review_evidence` | `query?, brand?, product_id?, aspect?, limit?` | matching review snippets | **new** — SQL LIKE |
+| 8 | `segments` | — | 5 segments with all fields | `:406-485` |
+| 9 | `segment_aspects` | `segment_id` | aspect scores **for that segment** | **new** — expose `:465` |
+| 10 | `competitors` | — | brands, price diffs, matrix | `:491-568` |
+| 11 | `marketing_trends` | — | weekly series, source volume | `:574-623` |
+| 12 | `recommendations` | `category?` | rule signals | `:629-780` |
+| 13 | `chart` | `chart_id` | the chart the user is looking at | request payload |
+| 14 | `compute` | `metric, group_by, filter` | one aggregation (avg price by brand, count by source, correlation price↔rating, sentiment by month) | **new** |
+| 15 | `anomalies` | `series` | z-score flags, change points | **new** |
+| 16 | `forecast` | `series, periods` | projection + residual band | `forecasting.py:57-105` + **new** band |
+| 17 | `swot` | `brand \| product` | 4 quadrants, each with evidence | **new** |
+| 18 | `persona` | `segment_id` | persona + inferred-only label | **new** |
+| 19 | `budget_split` | `total, goal` | allocation model with stated rules | **new**, declared model |
+| 20 | `kpi_plan` | `goal, channels` | recommended KPIs + measurement plan | **new**, no invented values |
+| 21 | `what_if_price` | `product_id, pct` | scenario arithmetic + assumptions | **new** |
+| 22 | `opportunities` | `brand?` | ranked opportunities | `api/marketing.py:23-82` + **new** ranking |
 
-**A. Strategy Generator** — a *template* prompt with the ten sections as a fixed skeleton, each section fed by pre-computed facts (market size/proxy, segment sizes, price position, sentiment drivers, competitor gaps). The "why" requirement is satisfied by an `evidence` list: every section cites `{metric, value, source}` and the renderer shows them as chips. If a section has no data, it prints **"Not enough data to support this section"** — never a fabricated number.
+UI actions are **not** server-side tools; they are emitted as `action` events with a fixed vocabulary:
+`navigate(path)`, `set_filter(key, value)`, `highlight_chart(id)`, `open_product(id)`, `select_segment(id)`,
+`set_page_tab(page, tab)`.
 
-**B. Chart Intelligence** — extend `ChatRequest` with a per-chart `{indicator, range, series}` contract; add anomaly detection (z-score over the series) and correlation (price vs rating) as **tools**, not prompt instructions, because the model is unreliable at arithmetic. Cross-page queries work by letting the orchestrator call the analytics service directly instead of relying on mounted charts.
+### 5.3 Anti-hallucination design (the part that makes this trustworthy)
 
-**C. Consumer Intelligence** — a tool that aggregates reviews by aspect and brand, returns ranked drivers/complaints with counts, and a prompt that must group by the user's categories (ecosystem, design, performance, price, UX). Cross-brand preference = driver delta between two brands, computed in Python.
+1. **Facts block.** Every tool output is flattened into a `FACTS` section with exact numbers and the source of
+   each. The prompt says: cite only these numbers.
+2. **Number audit (`backend/ai/guard.py`).** After streaming, extract every numeric token from the answer,
+   normalise (thousands separators, `%`, currency, `x`), and check membership in the facts set. Report
+   `ungrounded_numbers` in the `done` event; the UI shows "N numbers could not be traced to the data". One
+   automatic regeneration is allowed; a second failure is shown, not hidden.
+3. **Coverage policy.** Each module declares the fields it needs. Fields the platform does not collect
+   (§2.7) are listed in a `GAPS` block; the prompt instructs: *state the gap in one line, then continue with
+   what is available; never estimate silently.*
+4. **Source labels.** Each fact carries `source`; the UI renders a citation chip (`Brands · /api/analytics/brands`).
+5. **No fabricated campaign metrics.** A fixed list (`CTR, conversion, CAC, ROAS, spend, impressions`) is
+   answered as "not collected by this platform" plus a measurement plan — never as a number.
+6. **Temperature policy.** Analysis 0.2–0.3; creative (copy, slogans) 0.7; strategy 0.4.
+7. **Deterministic engines first.** SWOT, budget split, what-if and KPI plans are computed in Python; the LLM
+   only *writes them up*. The numbers never come from the model.
 
-**D. Competitor Intelligence** — tools: positioning (price vs sentiment/rating), price gaps vs median, review-derived weaknesses (negative-aspect frequency), differentiation opportunities (high-importance/low-satisfaction quadrant). The prompt turns tool output into the user's six bullets.
+### 5.4 UI design
 
-**E. Campaign & Content** — one tool per artefact (ideas, copy, slogans, calendar, influencer, launch, retention), each with a fixed output schema so the UI can render it consistently.
+- **Permanent panel, right side, full height.** `position: fixed; top: 0; right: 0; bottom: 0; width: clamp(360px, 26vw, 460px)`.
+  The main column gets `margin-right` equal to the panel width when open, so nothing is covered. Below 1100px it
+  becomes an overlay drawer; below 760px full screen (the existing rule at `global.css:891-893` already does this).
+- **Keep the floating "Ask AI" launcher** — the user explicitly asked to keep it. It opens/restores the panel;
+  the panel stays open across navigation and survives a reload (state in `localStorage`).
+- **Header:** title, model tier badge (Fast / Deep), context chips (page · brand · focused chart), new-chat,
+  collapse.
+- **Skill rail:** five module buttons (Strategy, Charts, Consumers, Competitors, Campaigns) + six advanced
+  actions (Opportunities, SWOT, Persona, KPIs, What-if, Forecast). Each inserts a prepared prompt scoped to the
+  current page and brand.
+- **Messages:** streamed Markdown with a typing cursor; tables, fenced code, links; citation chips under each
+  answer; action buttons ("Show me") that execute the emitted action; a small footer with `tools used`,
+  `source`, `ungrounded numbers`.
+- **Composer:** textarea, send/stop, "Deep analysis" toggle, clear conversation.
+- **Accessibility:** `role="complementary"`, `aria-live="polite"` on the message list (already present at
+  `AssistantChat.jsx:139`), focus trap when overlay, Escape closes only the overlay.
 
-**Advanced features** — each is a tool + a template: opportunity detection (review gaps + interest delta + competitor gap), predictive (only when `len(history) >= N`, else "not enough history"), SWOT (strengths = top drivers, weaknesses = top complaints, opportunities = gaps, threats = competitor momentum), persona (from segment stats + drivers), KPI advisor (objective → KPI set, deterministic mapping), what-if (explicit assumption block + sensitivity from price history, labelled as an assumption).
+### 5.5 Delivery order and effort
 
-### 5.3 UI — keep the overlay, add a dock, add actions
+Ordered so that each phase is shippable on its own and the visible product improves at every step.
+Sizes are implementer-days, gate included (pytest + build + Playwright, §III.1).
 
-1. **Keep** the floating launcher + overlay exactly as is (user's explicit request).
-2. **Add** a "pin to side" control in the header that switches the same component to a docked right column (`position: sticky`, full height, page content reflows). Same state, same messages — only layout changes. Default: overlay (no behaviour change for existing users).
-3. **Formatted streaming**:
-   - change `streamAssistantChat` to emit **deltas** (`onDelta`) in addition to the full text, so the renderer appends instead of re-parsing;
-   - memoise completed blocks; only the last (in-progress) block re-renders;
-   - add a blinking cursor while `pending`;
-   - add fenced code blocks, links, blockquotes, `---`;
-   - keep tables but buffer an unterminated table until its closing row (no layout snap);
-   - add "Copy" on assistant messages.
-4. **Platform control — declarative, never arbitrary.** The model never executes code. It emits a JSON `actions[]` block; the frontend validates each against a **whitelist of registered page capabilities** and renders them as **chips the user clicks**. Nothing happens without a click. Whitelist: `navigate(path)`, `set_filter({brand,source,range})`, `open_product(id)`, `set_tab(name)`, `focus_chart(id)`, `open_recommendation(id)`. No destructive action, no form submission, no external call. Unknown action → dropped and logged, never executed.
-5. **Evidence chips** — each factual claim can carry `{label, value, source}`; the renderer shows them under the message, linking to the page/chart.
+| Phase | Scope | Size | Why this order |
+|---|---|---|---|
+| **0. Foundation** | Orchestrator skeleton, tool registry (tools 1–13), SSE protocol, permanent panel, persistence, number audit, one process (`main.py`) | **L — 3.5 d** | Everything else plugs into it; also fixes the silent-snapshot defect by construction |
+| **1. Chart Intelligence v2** | Tools 14–16, anomaly flags, correlation, per-week aspect deltas, chart definitions, `range` wiring, "why" evidence | **M — 2 d** | Highest visible payoff; the user's example is a chart question |
+| **2. Strategy Generator** | 10-section template, evidence per section, budget split, KPI plan, timeline | **M — 2 d** | The named priority; depends on 0 and benefits from 1 |
+| **3. Consumer Intelligence** | Tool 9, `review_evidence`, segment comparison, "why Apple over Samsung" | **M — 1.5 d** | Data already exists; mostly assembly |
+| **4. Competitor Intelligence** | Head-to-head evidence, differentiation opportunities | **M — 1.5 d** | Data already exists |
+| **5. Campaign & Content** | Campaign/calendar/copy templates with data references, launch vs loyalty | **M — 1.5 d** | Reuses 2's template machinery |
+| **6. Advanced A** | SWOT, personas, opportunity ranking | **M — 2 d** | Needs 3 and 4 |
+| **7. Advanced B** | Predictive with uncertainty, what-if, KPI advisor | **M — 2 d** | Needs 1 and 2 |
+| **8. UI control** | `navigate` + `set_filter` (phase 1), then page actions (phase 2) | **M — 2 d** | Independent; can run in parallel with 3–7 |
 
-### 5.4 Delivery order (recommended)
+**Demo cut (if time is short):** Phase 0 + 1 + 2 + the `navigate`/`set_filter` half of 8 ≈ **8 days** gives the
+visible transformation: a permanent strategist panel that explains any chart with real numbers, writes a full
+strategy with evidence, and moves the user around the app.
 
-**Slice 1 — "Chart Intelligence, properly" (highest value, smallest risk).**
-Delta streaming + cursor + code/links + copy; chart `indicator`/`range` contract; anomaly + correlation tools; evidence chips; conversation persistence in `localStorage`; tests for `assistant.py` and the stream. *Why first:* it deepens the one module that already works and is the user's stated differentiator ("unul dintre cele mai interesante elemente diferențiatoare").
+**Total:** ≈ 18 implementer-days for everything, plus review/verification per PR.
 
-**Slice 2 — "Strategist".**
-Orchestrator skeleton (planning + tool registry + fallback); Strategy Generator (10 sections + why/evidence); SWOT; KPI Advisor; Consumer and Competitor tools. *Why second:* these are prompt+tool work on top of Slice 1's evidence plumbing; no new UI paradigm.
+### 5.6 What NOT to build
 
-**Slice 3 — "Control and simulation".**
-Docked panel; declarative actions + chips; persona generator; opportunity detection; what-if; predictive (guarded by history length). *Why last:* actions need the page-capability registry from Slice 1–2, and what-if needs the price history tools.
+- No vector database, no embeddings, no RAG at 48 reviews (§4.6).
+- No pandas/numpy/scikit-learn/transformers (§4.8).
+- No PostgreSQL migration (§4.8).
+- No model training or fine-tuning (the user said so explicitly).
+- No fabricated campaign metrics, demographics, market size or elasticity (§2.7).
+- No autonomous actions: the assistant proposes, the user clicks. The only auto-executed actions are
+  `navigate` and `highlight_chart`.
 
-Each slice ends with the full gate (pytest, Playwright, build) and a Camoufox proof of the new behaviour.
+---
 
 ## 6. Risks
 
-1. **Model quality.** The free model is weak at arithmetic and long structured output. Mitigation: pre-compute every number in Python (already the pattern in `chart_facts`); the model only narrates. A stronger model is Q4.
-2. **Latency.** Planning + tools + streaming can exceed 30 s. Mitigation: tools are local SQL/Python (fast); planning is a small JSON call; stream the answer as soon as the first tool returns. Never block the UI.
-3. **Prompt injection via data.** Reviews are user-generated text and flow into the prompt. Mitigation: keep data in a clearly delimited block, instruct the model that data is data, never instructions; the action whitelist means injected text cannot cause a side effect.
-4. **Action safety.** A model choosing the wrong action. Mitigation: chips require a click; whitelist; no destructive verbs; the action is a *suggestion*, not an execution.
-5. **Cost.** Every question is at least one LLM call, often two (plan + answer). Mitigation: cache orchestrations in `LLMCache` (`models.py:122`); reuse `advisor`'s existing 600 s recommendation cache pattern.
-6. **Scope creep.** The user listed five modules and six features; shipping all at once breaks "one concern per PR". Mitigation: the three slices above; each is a separate PR.
-7. **Breaking the current chat.** The orchestrator must fall back to today's keyword path on any failure. A regression here is worse than a missing feature.
-8. **Docked layout.** Reflowing page content can break charts (`ResponsiveContainer` needs a resize). Mitigation: dock as an overlay column that shrinks the main area with a CSS transition, and let `ResponsiveContainer` re-measure; verify on all eight pages.
-9. **Persistence and privacy.** Conversations may contain business data. `localStorage` is per-browser; no server storage until auth exists (Q8).
-10. **Test debt.** Zero assistant tests today; every slice must add them or the gate will not protect the new code.
+| # | Risk | Mitigation |
+|---|---|---|
+| 1 | Reasoning-model latency (15–100 s) makes a permanent panel feel broken | Two-tier models (§4.5), first-token progress, streamed output, visible tier badge |
+| 2 | The model quotes a number that is not in the facts | Number audit (§5.3.2), `ungrounded_numbers` surfaced in the UI, one regeneration |
+| 3 | The assistant answers with stale snapshot data (measured in §2.6) | One process, tools read MySQL directly, no snapshot fallback in the chat path; a labelled degradation if the DB is down |
+| 4 | Free-tier limits (1000 RPD) exhausted by a chatty panel | Existing `llm_cache` (`llm_service.py:130-164`), per-tool caching, a visible quota state, no automatic retry storms |
+| 5 | The assistant invents campaign metrics because the user asked for CAC/ROAS | Hard-coded unsupported-metric list (§5.3.5) + a contract test that asserts the refusal |
+| 6 | UI actions act on stale page state | Actions carry a page path; the runner ignores an action whose page is not mounted; no destructive verbs |
+| 7 | Streaming re-parses the whole Markdown per chunk (today's O(n²)) | Incremental block parsing + 60 ms throttle + a cursor (§5.4) |
+| 8 | The panel covers the dashboard on small screens | `margin-right` on the main column, drawer below 1100px, full screen below 760px |
+| 9 | A new endpoint drifts from the frontend contract (the historical failure mode, WORKING-NOTES IX.4) | Extend `test_contracts.py` with the new endpoints and the SSE event shapes |
+| 10 | The tool layer becomes a second business-logic copy of `analytics_service` | Tools call the service functions; they never re-implement a metric |
 
-## 7. QUESTIONS for the user (numbered, a recommendation each; "all rec" answers them)
+---
 
-**Q1 — Module priority.** Which module ships first? The five are A Strategy, B Chart Intelligence, C Consumer, D Competitor, E Campaign/Content.
-**Recommendation:** **B first** (deepen what already works — it is the stated differentiator and needs no new UI), then **A** (the strategist identity), then **E**, then **C** and **D** together (both are review-analysis tools sharing one aggregator).
+## 7. QUESTIONS for the user
 
-**Q2 — Panel placement.** Keep the floating overlay only, switch to a permanent right-hand dock, or both with a pin toggle?
-**Recommendation:** **both, overlay by default**, with a "pin to side" control in the header. This honours "o vom păstra" literally, adds the permanent panel the user asked to consider, and changes nothing for anyone who does not click pin.
+Fiecare întrebare are o recomandare. Răspunde „toate recomandările" dacă ești de acord cu toate.
 
-**Q3 — How much platform control.** (a) Read-only explanations; (b) suggest actions as chips the user clicks; (c) execute actions directly when the model decides.
-**Recommendation:** **(b)** — declarative, whitelisted actions rendered as chips, executed only on a user click. (c) is unsafe: a wrong navigation or filter silently changes what the user is looking at, and injected review text could trigger it.
+1. **Ce livrăm primele?** Există cinci module mari. Le facem pe rând, iar primele două ar fi
+   *Chart Intelligence* (explicarea graficelor) și *Strategy Generator* (strategia completă), pentru că sunt
+   cele pe care le vei vedea imediat în demo. Alternativa e să începem cu Consumer + Competitor, care au deja
+   datele pregătite și ies mai repede. — **Rec: Chart Intelligence, apoi Strategy Generator.** Sunt exact cele
+   două pe care le-ai numit prioritare, iar restul se sprijină pe ele.
 
-**Q4 — Model and reasoning latency.** Stay on the free `dots-studio/dots-3-note-preview:free`, or add a stronger model for planning/strategy with a longer timeout?
-**Recommendation:** **keep the free model as the default and add a per-request "Deep reasoning" toggle** that switches to a stronger model for the planning step and strategy/SWOT answers. Show an estimated wait; never block the UI; fall back to the free model on error or timeout.
+2. **Cât control vrei să aibă asistentul asupra aplicației?** Trei trepte: (a) doar navighează între pagini;
+   (b) navighează + schimbă filtrele (brand, sursă); (c) controlează și elementele din pagini — deschide fișa
+   unui produs, selectează un segment, schimbă tabul unui grafic. (c) atinge toate cele 8 pagini și cere mai mult
+   timp de testare. — **Rec: (b) acum, (c) imediat după.** Navigarea și filtrele dau 80% din senzația de
+   „control", fără să rescriem fiecare pagină.
 
-**Q5 — Behaviour when data is missing.** Show "0", hide the section, or say "not enough data"?
-**Recommendation:** **say "Not enough data" and name what is missing and what would unlock it** (e.g. "needs ≥ 8 weeks of price history; you have 4"). Never 0, never a fabricated number — this matches the repo rule "no placeholder presented as product".
+3. **Ce model folosim pentru răspunsuri?** Modelul configurat acum este un model de raționament care poate
+   gândi 15–100 de secunde înainte să răspundă — într-un panou permanent asta se simte ca o aplicație blocată.
+   Opțiuni: (a) păstrăm un singur model; (b) două trepte — un model rapid pentru întrebări pe grafice și modelul
+   de raționament doar pentru strategii, cu buton „Analiză profundă"; (c) model rapid peste tot. —
+   **Rec: (b).** Răspunsurile simple apar în câteva secunde, iar analizele grele rămân de calitate.
 
-**Q6 — New libraries.** The user's technology table lists Pandas, NumPy, Scikit-learn, Transformers. All were deliberately removed (`backend/requirements.txt`), and the DB is MySQL, not PostgreSQL.
-**Recommendation:** **add none of them for now.** Compute aggregates in SQL and Python's stdlib (the existing `chart_facts` pattern); add a library only if a specific feature cannot be done otherwise, and then one at a time with a measured justification. Keep MySQL.
+4. **Ce face asistentul când nu are datele necesare?** De exemplu, dacă îl întrebi de CTR, CAC sau ROAS —
+   platforma nu colectează campanii, deci nu are cum să știe. Opțiuni: (a) spune clar „platforma nu colectează
+   asta" și oferă ce se poate calcula; (b) dă o estimare etichetată ca estimare; (c) refuză întrebarea. —
+   **Rec: (a).** Este singura variantă care nu inventează cifre și rămâne utilă.
 
-**Q7 — Streaming fidelity.** Is the current token stream enough, or is a richer render required?
-**Recommendation:** **richer render** — delta-based append rendering, typing cursor, fenced code, links, blockquotes, buffered tables, copy button. This is what "frumos formatat" means in practice; the transport already streams, so the work is in `AssistantChat.jsx` only.
+5. **Acceptăm librării noi?** Tabelul tău propune Pandas, NumPy, Scikit-learn, Transformers, PostgreSQL.
+   La volumul actual (10 produse, 48 de recenzii) toate calculele se fac în câteva linii de Python simplu, iar
+   proiectul le-a eliminat anterior intenționat. — **Rec: nu adăugăm niciuna acum.** MySQL rămâne baza
+   (decizie deja luată), LLM rămâne OpenRouter. Dacă datele cresc, adăugăm atunci.
 
-**Q8 — Conversation persistence.** React state only, `localStorage`, or server-side history?
-**Recommendation:** **`localStorage`**, capped (e.g. last 20 messages per conversation, last 10 conversations), with "New conversation" clearing it. Server-side history needs auth and a schema change; defer until there is a user model.
+6. **Cum trimitem răspunsul către interfață?** Acum e text simplu, ceea ce înseamnă că asistentul nu poate
+   trimite butoane, acțiuni sau surse. Opțiuni: (a) rămânem la text simplu; (b) evenimente tipizate (SSE) care
+   pot transporta și text, și acțiuni, și surse. — **Rec: (b).** Fără asta nu există „arată-mi tabul" sau
+   „deschide produsul".
 
-**Q9 — Evidence / citations.** Must every factual claim cite its data source?
-**Recommendation:** **yes, for every number the assistant states** — an `evidence[]` list rendered as chips (`{label, value, source}`), produced by the tools, not by the model. This is the mechanism that makes "grounded" verifiable rather than a promise.
+7. **Păstrăm conversația după refresh?** Opțiuni: (a) nu (ca acum — se pierde la reload); (b) în browser
+   (`localStorage`), fără modificări de bază de date; (c) în baza de date, disponibilă pe orice dispozitiv. —
+   **Rec: (b).** Ieftin, fără migrare, suficient pentru demo și pentru utilizare zilnică.
 
-**Q10 — First release scope.** Ship the whole vision, or slice it?
-**Recommendation:** **three slices as in §5.4** — (1) Chart Intelligence + streaming + persistence + evidence; (2) orchestrator + Strategy + SWOT + KPI Advisor + Consumer/Competitor; (3) dock + actions + persona + opportunity + what-if + predictive. Each slice is one PR, gated and proven.
+8. **Panoul: permanent sau flotant?** Ai cerut permanent, în dreapta, de sus până jos, dar și păstrarea
+   butonului „Ask AI". Opțiuni: (a) panou permanent + butonul păstrat (butonul deschide/restaurează panoul);
+   (b) doar flotant, ca acum, dar mai mare; (c) permanent fără buton. — **Rec: (a).** Este exact ce ai descris.
+
+9. **Ce facem cu datele care lipsesc structural?** Platforma nu are deloc: demografice (vârstă, venit, oraș),
+   mărime de piață, bugete de campanie, date despre influenceri, elasticitatea prețului. Opțiuni: (a) asistentul
+   le declară necolectate și propune un plan de măsurare; (b) extindem platforma ca să le colecteze (proiect
+   separat, mult mai mare); (c) inventăm valori plauzibile pentru demo. — **Rec: (a).** (c) contrazice regula
+   „niciun placeholder prezentat ca produs".
+
+10. **Bugetul de apeluri și modelul.** Contul are ~1000 cereri/zi pe modelul gratuit. Un panou permanent poate
+    consuma repede. Opțiuni: (a) cache agresiv + un model rapid pentru chat + modelul de raționament doar la
+    cerere; (b) fără cache, toate cererile pe modelul de raționament; (c) alt model gratuit, ales de tine. —
+    **Rec: (a).** Și, dacă vrei alt model, spune-mi id-ul exact și îl punem în configurare.
+
+---
 
 ## 8. CONFIRMED / UNVERIFIED / NOT DONE
 
-**CONFIRMED (read the exact line or ran it):**
-- The chat, streaming transport, intent table, chart facts, context builder, recommendation engine and DB tables exist at the `file:line` cited in §2.1–§2.2.
-- No assistant tests: `grep -rn "assistant\|/ai/chat" backend/tests/*.py` → zero matches.
-- Current model is `dots-studio/dots-3-note-preview:free` (`GET 127.0.0.1:8020/health`).
-- Pandas/NumPy/Scikit-learn are absent by explicit decision (`backend/requirements.txt` comment).
-- The Markdown renderer cannot render code fences, links, blockquotes or `---` (`AssistantChat.jsx:25-70`).
-- `onText` receives the full accumulated text (`api.js:166`), which forces the O(n²) re-render.
-- `POST /ai/advice` has no caller in `src/` (grep over `src/`).
+**CONFIRMED (read the exact line, or ran it and saw the output):**
+- The assistant is a separate FastAPI app on 8020 with 6 routes (`server.py:40-150`); the main API on 8010 is
+  a different app (`main.py:44-64`).
+- Intent detection is keyword substring matching over 9 intents (`assistant.py:22-60`); there is no tool layer
+  anywhere (`grep` for `tools|tool_choice|function_call|tool_calls` → 0 hits).
+- Chart rows are sent to the backend (`ChatContext.jsx:46-55` → `assistant.py:133-145`), and exact facts are
+  pre-computed (`assistant.py:75-120`).
+- Live data volumes: 10 products, 48 reviews, 5 brands, 3 sources, 5 segments (endpoints called, output read).
+- **The assistant answered with snapshot numbers** (24%, sensitivity 82) while the dashboard showed live values
+  (37.5%, 0.0) — the snapshot file contains exactly 24% and 82. Cause of the fallback is UNVERIFIED (§2.6).
+- `advisor.py:451` indexes `data["exampleRecommendations"]`, a key the live dict does not have (`:136-182`).
+- The `range` filter is UI-only: `AppContext.jsx:4`, `FilterBar.jsx:15`, and no API call passes it
+  (`api.js:53-61`).
+- The launcher starts only `main:app` and npm (`scripts/start.ps1:117-118`, `:152`); nothing starts the
+  assistant service.
+- No assistant tests exist in `backend/tests/` or `e2e/`.
+- The Markdown renderer supports headings, pipe tables, one-level lists, inline bold/italic/code
+  (`AssistantChat.jsx:25-70`); it has no fenced code blocks, links, blockquotes or rules.
+- Streaming is incremental server-side (`advisor.py:375-377`) but the client re-renders the whole Markdown per
+  chunk (`api.js:160-167`, `AssistantChat.jsx:148`).
+- All three services are up right now (8010, 8020, 5173), and the assistant process started at 17:38:05,
+  after `advisor.py` was last modified at 17:31.
 
-**UNVERIFIED (inferred, not executed):**
-- `backend/services/forecasting.py` capabilities (not read in this pass).
-- Whether any page exposes tab/drawer state in a form an action bus could drive without refactoring (read only `ProductAnalysis.jsx` and `AIRecommendations.jsx` at a high level).
-- Real latency of a planning + answer round trip on the free model.
-- Whether the free model can reliably emit the orchestrator's JSON plan (small models often cannot; this is the main technical risk of Slice 2).
+**UNVERIFIED:**
+- Why `_live_market_data()` fell back to the snapshot at the moment of the probe (the endpoints answer in
+  <0.1 s now, so the failure was transient or environmental — e.g. a proxy variable in the service's
+  environment; not established).
+- Whether the configured free model supports native function calling. Not probed (would be a live call).
+- The actual first-token latency of the configured model on this machine. Not measured (no chat call made
+  beyond the incidental one below).
+- Whether `dots-studio/dots-3-note-preview:free` is still available and free at the time of implementation.
 
-**NOT DONE (and why):**
-- No code written; this is a read-only spec.
-- No live LLM call made (would consume the user's quota without consent).
-- No measurement of token cost per module.
-- No prototype of the action-chip mechanism.
+**NOT DONE:**
+- No code changed, no commit, no branch, no service started or stopped.
+- No live external call of my own. **Disclosure:** one incidental OpenRouter generation happened because the
+  read-only probe `GET http://127.0.0.1:8020/analytics/recommendations?category=Marketing` generated and cached
+  recommendations server-side. Budget used: **1 call**. No other external call was made.
+- No RAG, no embeddings, no library installation, no database change.
+
+---
 
 ## 9. Left on disk
 
-Nothing. No files created outside this spec; no processes started; no database writes. The working tree carries only the pre-existing `node_modules/.vite` churn from the running dev server (untracked/gitignored) and this new spec file.
+- `.orchestration/specs/004-ai-strategist-chatbot.md` — this file, the only thing written.
+- Nothing else created, deleted or modified. No processes started; the three running services were only read
+  with GET requests and left exactly as found.
 
-## USER DECISIONS (<pending>, binding)
-
-_Appended by the orchestrator only, after the user answers §7._
+by FiredMosquito831
