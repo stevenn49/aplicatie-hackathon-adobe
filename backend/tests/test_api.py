@@ -144,6 +144,164 @@ def test_sentiment_filters(client):
     assert 0 < emag["total_reviews"] <= all_reviews
 
 
+# --------------------------------------------------------------------------- #
+# Review mining (ABSA)
+# --------------------------------------------------------------------------- #
+
+# Frozen output of the pre-existing aspect table, captured from the seeded
+# scratch database before this feature was added. It must not move: the mining
+# endpoint is an addition, not a rewrite of the sentiment endpoint.
+FROZEN_SENTIMENT_ASPECTS = [
+    {"aspect": "Build quality", "score": 100.0, "mentions": 4},
+    {"aspect": "Display", "score": 88.9, "mentions": 9},
+    {"aspect": "Audio", "score": 83.3, "mentions": 3},
+    {"aspect": "Performance", "score": 78.6, "mentions": 14},
+    {"aspect": "Software & OS", "score": 71.4, "mentions": 7},
+    {"aspect": "Camera quality", "score": 68.8, "mentions": 8},
+    {"aspect": "Battery life", "score": 65.0, "mentions": 10},
+    {"aspect": "Price & value", "score": 59.1, "mentions": 11},
+]
+
+FROZEN_SENTIMENT_DISTRIBUTION = [
+    {"name": "Positive", "value": 62.5, "color": "var(--positive)"},
+    {"name": "Neutral", "value": 33.3, "color": "var(--neutral)"},
+    {"name": "Negative", "value": 4.2, "color": "var(--negative)"},
+]
+
+
+def test_sentiment_aspects_are_unchanged(client):
+    """
+    Equality contract: adding review mining must not move the existing aspect
+    table or the sentiment distribution by a single decimal.
+    """
+    body = client.get("/api/analytics/sentiment").json()
+    assert body["total_reviews"] == 48
+    assert body["aspects"] == FROZEN_SENTIMENT_ASPECTS
+    assert body["distribution"] == FROZEN_SENTIMENT_DISTRIBUTION
+
+
+def test_review_mining_shape(client):
+    response = client.get("/api/analytics/review-mining")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert set(body) == {"aspects", "recurring_problems", "recurring_praise", "coverage"}
+    assert body["coverage"]["reviews_analysed"] == 48
+    assert 0 < body["coverage"]["reviews_with_reasons"] <= 48
+    assert body["aspects"], "no aspects mined from a 48-review corpus"
+    assert body["recurring_praise"], "no praise mined from a 48-review corpus"
+    assert body["recurring_problems"], "no problems mined from a 48-review corpus"
+
+    for aspect in body["aspects"]:
+        assert set(aspect) == {"aspect", "score", "mentions", "polarity", "reasons"}
+        assert isinstance(aspect["aspect"], str) and aspect["aspect"]
+        assert 0 <= aspect["score"] <= 100
+        assert aspect["mentions"] > 0
+        assert aspect["polarity"] in ("positive", "negative", "mixed", "neutral")
+        assert aspect["reasons"], f"{aspect['aspect']} has no reasons"
+        for reason in aspect["reasons"]:
+            assert set(reason) == {"phrase", "polarity", "mentions", "review_ids"}
+            assert isinstance(reason["phrase"], str) and reason["phrase"]
+            assert reason["polarity"] in ("positive", "neutral", "negative")
+            assert reason["mentions"] == len(reason["review_ids"])
+            assert reason["review_ids"] == sorted(set(reason["review_ids"]))
+            assert all(review_id > 0 for review_id in reason["review_ids"])
+
+    for item in body["recurring_problems"]:
+        assert set(item) == {"phrase", "aspect", "polarity", "mentions", "review_ids"}
+        assert item["polarity"] == "negative"
+        assert item["mentions"] == len(item["review_ids"])
+    for item in body["recurring_praise"]:
+        assert set(item) == {"phrase", "aspect", "polarity", "mentions", "review_ids"}
+        assert item["polarity"] == "positive"
+        assert item["mentions"] == len(item["review_ids"])
+
+
+def test_review_mining_phrases_are_verbatim_from_a_stored_review(client, db_session):
+    """
+    Anti-invention guard across the whole corpus: every phrase must be a real
+    substring of at least one review it cites.
+    """
+    import re
+
+    from database.models import Review
+
+    body = client.get("/api/analytics/review-mining").json()
+    texts = {
+        review.id: re.sub(r"\s+", " ", review.content or "")
+        for review in db_session.query(Review).all()
+    }
+    checked = 0
+    for aspect in body["aspects"]:
+        for reason in aspect["reasons"]:
+            assert any(
+                reason["phrase"] in texts[review_id] for review_id in reason["review_ids"]
+            ), f"{reason['phrase']!r} is not verbatim in any cited review"
+            checked += 1
+    assert checked > 0
+
+
+def test_review_mining_is_deterministic(client):
+    first = client.get("/api/analytics/review-mining").json()
+    second = client.get("/api/analytics/review-mining").json()
+    assert first == second
+
+
+def test_review_mining_product_without_reviews(client, db_session):
+    """
+    A product that exists but has no reviews must return empty lists and
+    `reviews_analysed: 0` — never an error and never a fabricated score.
+    """
+    from database.models import Product
+
+    product = Product(
+        name="Review Mining Empty Fixture",
+        brand="Fixture Brand",
+        category="Test",
+        price=1.0,
+        currency="RON",
+        sku="FIXTURE-NO-REVIEWS",
+        review_count=0,
+    )
+    db_session.add(product)
+    db_session.commit()
+    db_session.refresh(product)
+    try:
+        response = client.get(
+            "/api/analytics/review-mining", params={"product_id": product.id}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["aspects"] == []
+        assert body["recurring_problems"] == []
+        assert body["recurring_praise"] == []
+        assert body["coverage"] == {"reviews_analysed": 0, "reviews_with_reasons": 0}
+    finally:
+        db_session.delete(product)
+        db_session.commit()
+
+
+def test_review_mining_brand_filter(client):
+    everything = client.get("/api/analytics/review-mining").json()
+    sony = client.get("/api/analytics/review-mining", params={"brand": "Sony"}).json()
+
+    assert 0 < sony["coverage"]["reviews_analysed"] < everything["coverage"]["reviews_analysed"]
+    assert sony["aspects"]
+    cited = {
+        review_id
+        for aspect in sony["aspects"]
+        for reason in aspect["reasons"]
+        for review_id in reason["review_ids"]
+    }
+    assert cited, "Sony reviews produced no reasons"
+
+
+def test_review_mining_unknown_product_is_404(client):
+    assert client.get(
+        "/api/analytics/review-mining", params={"product_id": 999999}
+    ).status_code == 404
+
+
 def test_brand_stats_shape(client):
     response = client.get("/api/analytics/brands")
     assert response.status_code == 200
