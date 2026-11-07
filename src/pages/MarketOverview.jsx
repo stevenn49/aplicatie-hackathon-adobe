@@ -7,8 +7,8 @@ import { useFetch } from "../hooks/useFetch.js";
 import { useFilters } from "../context/AppContext.jsx";
 import { ChartData } from "../context/ChatContext.jsx";
 import { BrandTag, ChartCard, EmptyState, ErrorState, KpiCard, PageHeading, PageLoading, SentimentBadge, SourceTag } from "../components/common.jsx";
-import { ChartAxes, ChartTooltip, ResponsiveChart, chartMargin } from "../components/charts.jsx";
-import { formatMoney } from "../constants/brands.js";
+import { ChartTooltip, ResponsiveChart, chartAxes, chartMargin } from "../components/charts.jsx";
+import { BRAND_COLORS, formatMoney } from "../constants/brands.js";
 
 const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
   .format(new Date())
@@ -21,7 +21,56 @@ export default function MarketOverview() {
   const brandsState = useFetch(() => getBrandStats(filters), [filters.brand]);
 
   const data = overviewState.data;
-  const topMover = useMemo(() => data?.topMovers?.[0], [data]);
+  const brandStats = brandsState.data || [];
+  const products = productsState.data || [];
+  const selectedBrand = filters.brand === "All brands" ? null : filters.brand;
+
+  /**
+   * GET /api/analytics/overview takes no parameters — it ignores ?brand and
+   * always returns the market-wide payload. The page used to send the filter
+   * anyway, which left it half-filtered: the share-of-voice donut (from
+   * /api/analytics/brands, which does honour ?brand) showed one brand while the
+   * KPI row, movers and mentions still described the whole market.
+   *
+   * The two endpoints that DO honour the filter are already fetched here, so a
+   * selected brand is narrowed from those: products for the catalogue count and
+   * the average price, the brand stat for the review count and the sentiment
+   * score (both computed by the API over that brand's reviews). Nothing is
+   * re-derived from raw review text.
+   */
+  const view = useMemo(() => {
+    if (!selectedBrand) {
+      return {
+        kpis: data?.kpis || [],
+        evolution: data?.evolution || [],
+        mentions: data?.mentions || [],
+        topMovers: data?.topMovers || [],
+        productCount: data?.product_count ?? 0,
+        brandCount: data?.brand_count ?? 0,
+      };
+    }
+    const stat = brandStats[0];
+    const categories = new Set(products.map((item) => item.category));
+    const averagePrice = products.length
+      ? Math.round(products.reduce((sum, item) => sum + item.price, 0) / products.length)
+      : null;
+    const sentiment = stat?.sentiment ?? null;
+    return {
+      kpis: [
+        { label: "Tracked products", value: String(products.length), change: null, note: `across ${categories.size} ${categories.size === 1 ? "category" : "categories"}`, tone: "neutral", icon: "layers", spark: [] },
+        { label: "Reviews analysed", value: String(stat?.mentions ?? 0), change: null, note: "for this brand", tone: "neutral", icon: "message", spark: [] },
+        { label: "Average sentiment", value: sentiment === null ? "—" : sentiment.toFixed(1), suffix: sentiment === null ? null : "/ 100", change: null, note: "across its reviews", tone: sentiment !== null && sentiment >= 60 ? "positive" : "neutral", icon: "heart", spark: [] },
+        { label: "Average price", value: averagePrice === null ? "—" : `${averagePrice.toLocaleString("ro-RO")} lei`, change: null, note: "1 brand monitored", tone: "neutral", icon: "trend", spark: [] },
+      ],
+      evolution: (data?.evolution || []).map((row) => ({ month: row.month, [selectedBrand]: row[selectedBrand] ?? 0 })),
+      mentions: (data?.mentions || []).filter((item) => item.brand === selectedBrand),
+      topMovers: (data?.topMovers || []).filter((item) => item.brand === selectedBrand),
+      productCount: products.length,
+      brandCount: products.length ? 1 : 0,
+    };
+  }, [selectedBrand, data, brandStats, products]);
+
+  const topMover = view.topMovers[0];
 
   if (overviewState.loading || productsState.loading || brandsState.loading) return <PageLoading />;
   if (overviewState.error || productsState.error || brandsState.error) {
@@ -29,13 +78,12 @@ export default function MarketOverview() {
   }
   if (!data) return <EmptyState />;
 
-  const brandStats = brandsState.data || [];
   const share = brandStats.map((item) => ({ name: item.brand, value: item.shareOfVoice, color: item.color }));
   const totalShare = share.reduce((sum, item) => sum + item.value, 0);
-  const evolutionKeys = data.evolution.length
-    ? Object.keys(data.evolution[0]).filter((key) => key !== "month")
+  const evolutionKeys = view.evolution.length
+    ? Object.keys(view.evolution[0]).filter((key) => key !== "month")
     : [];
-  const colorFor = (brand) => brandStats.find((item) => item.brand === brand)?.color || "var(--text-muted)";
+  const colorFor = (brand) => brandStats.find((item) => item.brand === brand)?.color || BRAND_COLORS[brand] || "var(--text-muted)";
 
   return (
     <div className="page">
@@ -45,10 +93,10 @@ export default function MarketOverview() {
         description="A clear view of what's moving across the tech landscape."
         action={<span className="freshness-pill"><span className="live-dot" /> Live market pulse</span>}
       />
-      <ChartData title="KPI summary" subtitle="Headline KPIs at the top of the overview" data={data.kpis} />
+      <ChartData title="KPI summary" subtitle="Headline KPIs at the top of the overview" data={view.kpis} />
 
       <div className="kpi-grid">
-        {data.kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
+        {view.kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
         {topMover && (
           <article className="kpi-card trending-kpi">
             <div className="kpi-top"><span>Biggest price move</span><span className="kpi-icon"><TrendingUp size={16} /></span></div>
@@ -72,17 +120,17 @@ export default function MarketOverview() {
         <ChartCard
           title="Conversation volume over time"
           subtitle="Weekly review mentions per brand, indexed to 100"
-          data={data.evolution}
+          data={view.evolution}
           action={<div className="chart-period-label"><span className="live-dot" /> From stored reviews</div>}
           className="evolution-card"
         >
-          {data.evolution.length ? (
+          {view.evolution.length ? (
             <>
               <ResponsiveChart height={286}>
-                <LineChart data={data.evolution} margin={chartMargin}>
-                  <ChartAxes xKey="month" />
+                <LineChart data={view.evolution} margin={chartMargin}>
+                  {chartAxes("month", { yDomain: [0, 100] })}
                   {evolutionKeys.map((brand) => (
-                    <Line key={brand} type="monotone" dataKey={brand} stroke={colorFor(brand)} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} connectNulls />
+                    <Line key={brand} type="linear" dataKey={brand} stroke={colorFor(brand)} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
                   ))}
                 </LineChart>
               </ResponsiveChart>
@@ -123,13 +171,13 @@ export default function MarketOverview() {
         <ChartCard
           title="Top movers"
           subtitle="Biggest price shifts since the first recorded point"
-          data={data.topMovers?.map(({ name, brand, category, change }) => ({ name, brand, category, change }))}
+          data={view.topMovers.map(({ name, brand, category, change }) => ({ name, brand, category, change }))}
           action={<Link className="text-link" to="/products">All products <ExternalLink size={13} /></Link>}
           className="movers-card"
         >
-          {data.topMovers.length ? (
+          {view.topMovers.length ? (
             <div className="mover-list">
-              {data.topMovers.map((product, index) => (
+              {view.topMovers.map((product, index) => (
                 <div className="mover-row" key={product.id}>
                   <span className="mover-rank">0{index + 1}</span>
                   <span className="product-initial" style={{ color: product.color, background: `${product.color}18` }}>{product.brand.slice(0, 1)}</span>
@@ -153,13 +201,13 @@ export default function MarketOverview() {
         <ChartCard
           title="Notable mentions"
           subtitle="High-signal conversations across your sources"
-          data={data.mentions.map(({ brand, text, sentiment, source, time }) => ({ brand, text, sentiment, source, time }))}
+          data={view.mentions.map(({ brand, text, sentiment, source, time }) => ({ brand, text, sentiment, source, time }))}
           action={<span className="live-status"><span className="live-dot" /> LIVE</span>}
           className="mentions-card"
         >
-          {data.mentions.length ? (
+          {view.mentions.length ? (
             <div className="mention-list">
-              {data.mentions.map((mention) => (
+              {view.mentions.map((mention) => (
                 <article className="mention-row" key={mention.id}>
                   <span className={`mention-avatar mention-${mention.brand.toLowerCase()}`}>{mention.initials}</span>
                   <div className="mention-main">
@@ -180,7 +228,7 @@ export default function MarketOverview() {
       </div>
 
       <div className="overview-footer-strip">
-        <span><Radio size={14} /> Monitoring <strong>{data.product_count} products</strong> across {data.brand_count} tech brands</span>
+        <span><Radio size={14} /> Monitoring <strong>{view.productCount} products</strong> across {view.brandCount} tech {view.brandCount === 1 ? "brand" : "brands"}</span>
         <Link to="/recommendations">See what to do next <ArrowUpRight size={14} /></Link>
       </div>
     </div>
