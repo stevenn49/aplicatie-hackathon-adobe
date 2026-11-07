@@ -10,7 +10,7 @@ Rule used throughout: a value that cannot be computed from stored data is `None`
 and the UI renders "not enough data". A fabricated zero is never returned.
 """
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --------------------------------------------------------------------------- #
@@ -298,3 +298,52 @@ class RecommendationsDashboard(BaseModel):
     summary: ExecutiveSummary
     items: List[InsightCard] = []
     high_priority: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# Review mining (aspect-based sentiment analysis)
+# --------------------------------------------------------------------------- #
+
+class MinedReason(BaseModel):
+    """One concrete phrase from one or more reviews that supports an aspect."""
+    phrase: str                                # verbatim clause from the review
+    polarity: str                              # positive | neutral | negative
+    mentions: int                              # == len(review_ids)
+    review_ids: List[int] = []
+
+
+class MinedAspect(BaseModel):
+    """
+    An aspect with the reasons that produced its score.
+
+    `score` is 0-100 computed from the reasons themselves
+    (positive + neutral / 2 over the reason count); it is never a fabricated
+    value, and an aspect with no reasons is omitted rather than scored 0.
+    """
+    aspect: str
+    score: float
+    mentions: int                              # distinct reviews with a reason
+    polarity: str                              # positive | negative | mixed | neutral
+    reasons: List[MinedReason] = []
+
+
+class RecurringReason(BaseModel):
+    """A problem or a praise that recurs across the reviews in scope."""
+    phrase: str
+    aspect: str
+    polarity: str
+    mentions: int
+    review_ids: List[int] = []
+
+
+class ReviewMiningCoverage(BaseModel):
+    """How much of the corpus actually produced a reason."""
+    reviews_analysed: int = 0
+    reviews_with_reasons: int = 0
+
+
+class ReviewMiningResponse(BaseModel):
+    aspects: List[MinedAspect] = []
+    recurring_problems: List[RecurringReason] = []
+    recurring_praise: List[RecurringReason] = []
+    coverage: ReviewMiningCoverage = Field(default_factory=ReviewMiningCoverage)

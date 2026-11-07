@@ -23,11 +23,13 @@ from schemas.dto import (
     RecommendationsDashboard,
     ExecutiveSummary,
     InsightCard,
+    ReviewMiningResponse,
 )
 from services.sentiment_analysis import sentiment_service
 from services.forecasting import forecasting_service
 from services.recommendations import recommendation_service
 from services.analytics_service import analytics_service, ASPECT_LABELS
+from services.review_mining import review_mining_service
 from services.llm_service import llm_service, extract_json
 from data_collection.trends import trend_collector
 
@@ -119,6 +121,39 @@ def get_sentiment_dashboard(
         reviews=review_rows,
         total_reviews=len(reviews),
     )
+
+
+@router.get("/review-mining", response_model=ReviewMiningResponse)
+def get_review_mining(
+    product_id: Optional[int] = Query(None, gt=0, description="Restrict to one product"),
+    brand: Optional[str] = Query(None, description="Restrict to one brand"),
+    db: Session = Depends(get_db)
+):
+    """
+    Aspect-based sentiment mining: the concrete reasons behind each aspect, the
+    recurring problems and the recurring praise, with the review ids that
+    support every phrase.
+
+    Every phrase is a verbatim clause of a stored review, so a reason can never
+    be invented; every count is computed from the rows in scope. A filter that
+    matches no reviews returns empty lists and `reviews_analysed: 0` — never a
+    fabricated score.
+    """
+    query = db.query(ReviewModel).join(ProductModel, ReviewModel.product_id == ProductModel.id)
+
+    if product_id:
+        product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product with ID {product_id} not found"
+            )
+        query = query.filter(ReviewModel.product_id == product_id)
+    if brand:
+        query = query.filter(ProductModel.brand.ilike(brand.strip()))
+
+    reviews = query.order_by(ReviewModel.id).all()
+    return ReviewMiningResponse(**review_mining_service.mine(reviews))
 
 
 @router.get("/brands", response_model=List[BrandStat])
