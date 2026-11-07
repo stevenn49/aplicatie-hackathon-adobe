@@ -12,7 +12,7 @@ Spec paths are under `.orchestration/specs/`. "User decisions" names the binding
 
 | Agent | Branch / output | Scope | State |
 | --- | --- | --- | --- |
-| **E2E fixer** | `fix/e2e-findings` | Tests every page in Camoufox and repairs what is broken. Must keep the gate green. | running |
+| **E2E fixer** | `fix/e2e-findings` | Tests every page in Camoufox and repairs what is broken. Must keep the gate green. **Scope addition 18:05, user's own words ("e cel mai important ca nu adauga sau cauta produse cum ar trebui"): build queue item 1 inside this branch — the four missing calls in `src/services/api.js`, the Add / Import-from-eMAG / Edit / Delete UI in `ProductAnalysis.jsx`, `launch` added to `ProductBase` and `ProductUpdate`, and the duplicate-SKU 500 → 409. This outranks the remaining repairs.** | running |
 | **Spec 004** | `.orchestration/specs/004-ai-strategist-chatbot.md` | Read-only investigation of the AI Marketing Strategist expansion | running |
 | **Spec 005** | `.orchestration/specs/005-intelligence-modules.md` | Read-only investigation of the 10 intelligence modules | running |
 
