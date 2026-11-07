@@ -55,6 +55,7 @@ export default function MarketingAnalytics() {
         <ChartCard
           title="Mention volume over time"
           subtitle="Weekly mentions per brand and source, indexed to 100"
+          data={trends}
           className="marketing-interest-chart"
           action={
             <div className="metric-switch">
@@ -86,7 +87,7 @@ export default function MarketingAnalytics() {
           ) : <EmptyState title="No mention history yet" />}
         </ChartCard>
 
-        <ChartCard title="Where the conversation lives" subtitle="Mention volume by source">
+        <ChartCard title="Where the conversation lives" subtitle="Mention volume by source" data={sourceVolume}>
           {sourceVolume.length ? (
             <>
               <ResponsiveChart height={244}>

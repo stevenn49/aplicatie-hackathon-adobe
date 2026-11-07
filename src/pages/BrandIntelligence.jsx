@@ -21,12 +21,19 @@ export default function BrandIntelligence() {
     () => selectedBrands.filter((brand) => availableStats.some((item) => item.brand === brand)),
     [selectedBrands, availableStats],
   );
+  const evolution = overviewState.data?.evolution || [];
+  // Only the series actually drawn: the assistant must not reason about a brand
+  // the chart does not show. Declared before the early returns so the hook order
+  // is stable across loading and loaded renders.
+  const evolutionSeries = useMemo(() => {
+    const keys = [activeBrand?.brand, ...visibleBrands.filter((brand) => brand !== activeBrand?.brand)].filter(Boolean);
+    return evolution.map((row) => ({ month: row.month, ...Object.fromEntries(keys.map((key) => [key, row[key]])) }));
+  }, [evolution, activeBrand?.brand, visibleBrands]);
 
   if (statsState.loading || overviewState.loading) return <PageLoading />;
   if (statsState.error || overviewState.error) return <ErrorState error={statsState.error || overviewState.error} />;
   if (!availableStats.length) return <EmptyState title="No brand data yet" description="Collect reviews for at least one product." />;
 
-  const evolution = overviewState.data?.evolution || [];
   const colorFor = (brand) => availableStats.find((item) => item.brand === brand)?.color || "var(--text-muted)";
   const toggleBrand = (brand) =>
     setSelectedBrands((current) => (current.includes(brand) ? current.filter((value) => value !== brand) : [...current, brand]));
@@ -99,6 +106,7 @@ export default function BrandIntelligence() {
         <ChartCard
           title="Conversation volume over time"
           subtitle={visibleBrands.length ? `Indexed mentions for ${visibleBrands.join(" and ")}` : `Indexed mentions for ${activeBrand?.brand}`}
+          data={evolutionSeries}
           className="brand-sentiment-chart"
         >
           {evolution.length ? (
@@ -117,7 +125,7 @@ export default function BrandIntelligence() {
           ) : <EmptyState title="No mention history yet" />}
         </ChartCard>
 
-        <ChartCard title="Share of voice" subtitle="Conversation share by brand">
+        <ChartCard title="Share of voice" subtitle="Conversation share by brand" data={availableStats.map(({ brand, shareOfVoice }) => ({ brand, shareOfVoice }))}>
           <ResponsiveChart height={250}>
             <BarChart data={availableStats} margin={chartMargin} layout="vertical">
               <CartesianGrid {...gridProps} />
@@ -137,7 +145,12 @@ export default function BrandIntelligence() {
       </div>
 
       {activeBrand && (activeBrand.topics.length > 0 || activeBrand.concerns.length > 0) && (
-        <ChartCard title="What people are saying" subtitle={`Top conversation themes for ${activeBrand.brand}`} className="topics-card">
+        <ChartCard
+          title="What people are saying"
+          subtitle={`Top conversation themes for ${activeBrand.brand}`}
+          data={[{ brand: activeBrand.brand, praised: activeBrand.topics.join("; "), needsAttention: activeBrand.concerns.join("; ") }]}
+          className="topics-card"
+        >
           <div className="topic-columns">
             <div className="topic-column praised">
               <div className="topic-heading">
