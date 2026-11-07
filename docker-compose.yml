@@ -1,0 +1,30 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: marketpulse-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-marketpulse_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-marketpulse}
+      MYSQL_USER: ${MYSQL_USER:-marketpulse}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-marketpulse}
+    ports:
+      # Host 3307 deliberately: 3306 stays free for a native MySQL install.
+      - "127.0.0.1:3307:3306"
+    # MySQL 8.4 removed --default-authentication-plugin; caching_sha2_password is
+    # already the default. Do not re-add it or mysqld aborts on startup.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - marketpulse-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-marketpulse_root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  marketpulse-mysql-data:
+    name: marketpulse-mysql-data

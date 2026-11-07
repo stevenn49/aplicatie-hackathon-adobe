@@ -71,35 +71,16 @@ class GoogleTrendsConnector(BaseConnector):
                             "recorded_at": datetime.utcnow()
                         }]
             except Exception as exc:
-                logger.warning(f"[GoogleTrends] PyTrends query rate-limited or failed for '{keyword}': {exc}. Using trend estimator.")
+                logger.warning(
+                    f"[GoogleTrends] PyTrends query rate-limited or failed for '{keyword}': {exc}"
+                )
 
-        # Graceful fallback estimation if Google Trends rate limits the IP
-        return self._estimate_trend(keyword, category_name)
-
-    def _estimate_trend(self, keyword: str, category_name: str) -> List[Dict[str, Any]]:
-        """
-        Fallback market interest estimation when external Google Trends API is unreachable.
-        """
-        # Seeded tech keywords with high velocity
-        high_velocity_keywords = ["ai", "m4", "snapdragon", "rtx", "oled", "s25", "iphone 16"]
-        keyword_lower = keyword.lower()
-
-        if any(hk in keyword_lower for hk in high_velocity_keywords):
-            score = 88.0
-            direction = "increasing"
-        else:
-            score = 72.0
-            direction = "stable"
-
-        return [{
-            "category": category_name,
-            "keyword": keyword,
-            "trend_score": score,
-            "search_interest": round(score * 0.95, 1),
-            "trend_direction": direction,
-            "source": "MarketPulse Trend Engine",
-            "recorded_at": datetime.utcnow()
-        }]
+        # No fabricated fallback. The previous implementation returned a hardcoded
+        # 88.0 / 72.0 score labelled "MarketPulse Trend Engine", which presented an
+        # invented number as a measurement. An empty list means "not measured" and
+        # the API layer reports it as unavailable.
+        logger.info(f"[GoogleTrends] No live data available for '{keyword}'.")
+        return []
 
 
 google_trends_connector = GoogleTrendsConnector()

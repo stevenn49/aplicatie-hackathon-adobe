@@ -1,49 +1,139 @@
-import { BRANDS, brandStats, marketingTrend, overview, priceHistory, products, recommendations, segments, sentiment } from "../mocks/marketData.js";
+/**
+ * The only HTTP layer in the app. Pages never call fetch directly.
+ *
+ * There is deliberately no mock fallback: if the backend is unreachable the
+ * pages render ErrorState. A dashboard that silently shows fixtures is worse
+ * than one that says it cannot reach the API.
+ */
 
-const API_URL = import.meta.env.VITE_API_URL || "";
-const delay = (data, ms = 360) => new Promise((resolve) => setTimeout(() => resolve(structuredClone(data)), ms));
-const rangePoints = (range) => ({ "7d": 2, "30d": 5, "90d": 12, "1y": 12 }[range] || 12);
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8010").replace(/\/+$/, "");
 
-function filterProducts(filters = {}) {
-  return products.filter((product) => {
-    const matchesBrand = !filters.brand || filters.brand === "All brands" || product.brand === filters.brand;
-    const query = filters.query?.trim().toLowerCase();
-    const matchesQuery = !query || `${product.name} ${product.brand} ${product.category}`.toLowerCase().includes(query);
-    return matchesBrand && matchesQuery;
-  });
+export class ApiError extends Error {
+  constructor(message, status, path) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.path = path;
+  }
 }
 
-async function request(path, fallback) {
-  if (!API_URL) return delay(fallback);
-  const response = await fetch(`${API_URL}${path}`);
-  if (!response.ok) throw new Error(`Request failed (${response.status}) for ${path}`);
+async function request(path, { signal } = {}) {
+  const url = `${API_URL}${path}`;
+  let response;
+  try {
+    response = await fetch(url, { signal, headers: { Accept: "application/json" } });
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new ApiError(
+      `Cannot reach the API at ${API_URL}. Is the backend running?`,
+      0,
+      path,
+    );
+  }
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const body = await response.json();
+      detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail ?? "");
+    } catch {
+      detail = await response.text().catch(() => "");
+    }
+    throw new ApiError(
+      detail ? `${response.status}: ${detail}` : `Request failed (${response.status})`,
+      response.status,
+      path,
+    );
+  }
+
+  if (response.status === 204) return null;
   return response.json();
 }
 
-export const getMarketOverview = (filters = {}) => request("/analytics/overview", {
-  ...overview,
-  evolution: overview.evolution.slice(-rangePoints(filters.range)),
-  mentions: overview.mentions.filter((mention) =>
-    (!filters.brand || filters.brand === "All brands" || mention.brand === filters.brand) &&
-    (!filters.source || filters.source === "All sources" || mention.source === filters.source)),
-  topMovers: [...filterProducts(filters)].sort((a, b) => b.change - a.change).slice(0, 4),
-});
-export const getProducts = (filters = {}) => request("/products", filterProducts(filters));
-export const getProductComparison = (ids = ["p1", "p2"]) =>
-  request(`/products/compare?ids=${ids.join(",")}`, products.filter((product) => ids.includes(product.id)));
-export const getProductDetail = (id) => request(`/products/${id}`, products.find((product) => product.id === id) || null);
-export const getBrandStats = (filters = {}) => request("/analytics/brands", filters.brand && filters.brand !== "All brands" ? brandStats.filter((item) => item.brand === filters.brand) : brandStats);
-export const getSentiment = (filters = {}) => request("/analytics/sentiment", {
-  ...sentiment,
-  trend: sentiment.trend.slice(-rangePoints(filters.range)),
-  reviews: sentiment.reviews.filter((review) =>
-    (!filters.source || filters.source === "All sources" || review.source === filters.source) &&
-    (!filters.brand || filters.brand === "All brands" || review.brand === filters.brand)),
-});
-export const getConsumerSegments = () => request("/analytics/consumer-segments", segments);
-export const getMarketingTrends = (filters = {}) => request("/marketing/trends", marketingTrend.slice(-rangePoints(filters.range)));
-export const getCompetitors = () => request("/analytics/competitors", {
-  brands: BRANDS,
-  priceDifferences: products.slice(0, 5).map((product) => ({ name: product.name, brand: product.brand, price: product.price, baseline: 999, difference: product.price - 999 })),
-});
-export const getRecommendations = (filters = {}) => request("/analytics/recommendations", filters.category && filters.category !== "All" ? recommendations.filter((item) => item.category === filters.category) : recommendations);
+const query = (params) => {
+  const search = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "" || value === "All brands" || value === "All sources" || value === "All categories") return;
+    search.set(key, value);
+  });
+  const text = search.toString();
+  return text ? `?${text}` : "";
+};
+
+/* ------------------------------------------------------------------ */
+/* Market overview                                                     */
+/* ------------------------------------------------------------------ */
+
+export const getMarketOverview = (filters = {}) =>
+  request(`/api/analytics/overview${query({ brand: filters.brand })}`);
+
+/* ------------------------------------------------------------------ */
+/* Products                                                            */
+/* ------------------------------------------------------------------ */
+
+export const getProducts = (filters = {}) =>
+  request(`/api/products${query({
+    search: filters.query?.trim(),
+    brand: filters.brand,
+  })}`);
+
+export const getProductComparison = (ids = []) => {
+  const numeric = ids.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  if (numeric.length < 2) return Promise.resolve([]);
+  return request(`/api/products/compare?ids=${numeric.join(",")}`);
+};
+
+export const getProductDetail = (id) => {
+  if (id === null || id === undefined) return Promise.resolve(null);
+  return request(`/api/products/${Number(id)}`);
+};
+
+/* ------------------------------------------------------------------ */
+/* Brands                                                              */
+/* ------------------------------------------------------------------ */
+
+export const getBrandStats = (filters = {}) =>
+  request(`/api/analytics/brands${query({ brand: filters.brand })}`);
+
+/* ------------------------------------------------------------------ */
+/* Sentiment                                                           */
+/* ------------------------------------------------------------------ */
+
+export const getSentiment = (filters = {}) =>
+  request(`/api/analytics/sentiment${query({
+    brand: filters.brand,
+    source: filters.source,
+  })}`);
+
+/* ------------------------------------------------------------------ */
+/* Consumer segments                                                   */
+/* ------------------------------------------------------------------ */
+
+export const getConsumerSegments = () => request("/api/analytics/consumer-segments");
+
+/* ------------------------------------------------------------------ */
+/* Marketing                                                           */
+/* ------------------------------------------------------------------ */
+
+export const getMarketingTrends = () => request("/api/marketing/trends");
+
+/* ------------------------------------------------------------------ */
+/* Competitors                                                         */
+/* ------------------------------------------------------------------ */
+
+export const getCompetitors = () => request("/api/analytics/competitors");
+
+/* ------------------------------------------------------------------ */
+/* Recommendations                                                     */
+/* ------------------------------------------------------------------ */
+
+export const getRecommendations = (filters = {}) =>
+  request(`/api/analytics/recommendations${query({ category: filters.category === "All" ? "" : filters.category })}`);
+
+/* ------------------------------------------------------------------ */
+/* Diagnostics                                                         */
+/* ------------------------------------------------------------------ */
+
+export const getHealth = () => request("/health");
+
+export const apiBaseUrl = API_URL;

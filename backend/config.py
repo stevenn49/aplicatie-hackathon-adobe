@@ -7,6 +7,11 @@ from pydantic import Field
 class Settings(BaseSettings):
     """
     Application Settings loaded from environment variables or .env file.
+
+    The database is MySQL. Two supported setups, both driven by DATABASE_URL:
+      - Docker (default):  mysql+pymysql://marketpulse:marketpulse@127.0.0.1:3307/marketpulse
+      - Native install:    mysql+pymysql://marketpulse:marketpulse@127.0.0.1:3306/marketpulse
+    Point DATABASE_URL at whichever one is running; nothing else changes.
     """
     APP_NAME: str = "MarketPulse AI Backend"
     APP_ENV: str = "development"
@@ -18,8 +23,10 @@ class Settings(BaseSettings):
     # CORS settings - split comma separated string into list
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
 
-    # Database: PostgreSQL by default, with SQLite fallback for local development
-    DATABASE_URL: str = "sqlite:///./marketpulse.db"
+    # Database. MySQL only. There is no SQLite fallback: a wrong URL must fail loudly.
+    DATABASE_URL: str = "mysql+pymysql://marketpulse:marketpulse@127.0.0.1:3307/marketpulse"
+    DB_POOL_SIZE: int = 10
+    DB_POOL_RECYCLE: int = 1800
 
     # External Connectors Configuration
     EMAG_REQUEST_TIMEOUT: int = 15
@@ -38,9 +45,23 @@ class Settings(BaseSettings):
     # Twitter / X API Credentials
     TWITTER_BEARER_TOKEN: str = ""
 
+    # OpenRouter LLM. Empty key = the LLM surfaces degrade to the rule-based engine
+    # and say so; nothing is fabricated.
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_TIMEOUT: int = 60
+    OPENROUTER_MAX_TOKENS: int = 900
+    OPENROUTER_APP_NAME: str = "MarketPulse AI"
+    OPENROUTER_APP_URL: str = "http://localhost:5173"
+
     @property
     def cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def llm_enabled(self) -> bool:
+        return bool(self.OPENROUTER_API_KEY.strip() and self.OPENROUTER_MODEL.strip())
 
     class Config:
         env_file = ".env"

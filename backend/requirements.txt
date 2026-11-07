@@ -4,10 +4,10 @@ uvicorn[standard]>=0.28.0
 pydantic>=2.7.0
 pydantic-settings>=2.2.0
 
-# Database & ORM
+# Database & ORM (MySQL)
 SQLAlchemy>=2.0.0
-psycopg2-binary>=2.9.9
-alembic>=1.13.0
+PyMySQL>=1.1.0
+cryptography>=42.0.0
 
 # Environment & Settings
 python-dotenv>=1.0.0
@@ -18,14 +18,19 @@ beautifulsoup4>=4.12.0
 lxml>=5.1.0
 
 # External APIs
-praw>=7.7.1
 pytrends>=4.9.2
-
-# Data Processing & Analytics
-pandas>=2.2.0
-numpy>=1.26.0
-scikit-learn>=1.4.0
 
 # Sentiment Analysis
 vaderSentiment>=3.3.2
-textblob>=0.18.0
+
+# Testing
+pytest>=8.0.0
+
+# Notes:
+# - psycopg2-binary was removed: the project targets MySQL.
+# - alembic was removed: there is no alembic.ini or migrations/ directory, so a
+#   half-installed migration tool was worse than none. Schema is created by
+#   SQLAlchemy's create_all on startup; add Alembic properly when migrations are
+#   actually needed.
+# - pandas / numpy / scikit-learn were removed: nothing imports them.
+# - praw / textblob were removed: nothing imports them.

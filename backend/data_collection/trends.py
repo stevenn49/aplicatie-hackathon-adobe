@@ -30,11 +30,19 @@ class TrendCollector:
         logger.info("[TrendCollector] Starting refresh of technology market trends...")
         updated_records = []
 
+        unavailable = []
+
         for item in self.default_tracked_topics:
             category = item["category"]
             keyword = item["keyword"]
 
             trend_data_list = google_trends_connector.get_interest(keyword, category_name=category)
+            if not trend_data_list:
+                # The connector no longer fabricates a score. Record the gap so the
+                # caller can report it instead of silently showing stale numbers.
+                unavailable.append(keyword)
+                continue
+
             for t in trend_data_list:
                 # Check if existing metric for category & keyword exists
                 existing = (
@@ -63,6 +71,11 @@ class TrendCollector:
                 updated_records.append(t)
 
         db.commit()
+        if unavailable:
+            logger.warning(
+                f"[TrendCollector] Google Trends returned nothing for: {', '.join(unavailable)}. "
+                "Those metrics were left unchanged."
+            )
         logger.info(f"[TrendCollector] Successfully refreshed {len(updated_records)} trend metrics.")
         return updated_records
 

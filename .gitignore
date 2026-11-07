@@ -14,3 +14,17 @@ backend/*.sqlite3
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Orchestration notes (working-notes skill) are committed: the team works
+# cumulatively on this repo and needs the queue, specs and handoffs.
+# Only the local scratch copy of a handoff draft stays untracked.
+.orchestration/*.bak-*
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Local database volume
+mysql-data/

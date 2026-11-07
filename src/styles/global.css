@@ -826,3 +826,30 @@ select option { color: #ececf3; background: #20222b; }
   .activity-copy p { display: none; }
   .activity-event { min-height: 48px; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Utility states added with the real-data integration                 */
+/* ------------------------------------------------------------------ */
+.muted {
+  color: var(--text-muted) !important;
+  font-weight: 400 !important;
+}
+
+.live-dot.offline {
+  background: var(--negative);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--negative) 18%, transparent);
+}
+
+.timeline-empty {
+  padding: 12px 4px 4px;
+  font-size: 12px;
+}
+
+.matrix-na {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.sentiment-number.neutral {
+  color: var(--text-muted);
+}

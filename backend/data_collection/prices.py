@@ -49,7 +49,11 @@ class PriceCollector:
         price_changed = abs(observed_price - product.price) > 0.01
 
         if price_changed:
-            logger.info(f"[PriceCollector] Price change detected for '{product.name}': {product.price} -> {observed_price} {observed_currency}")
+            # Capture the previous price BEFORE reassigning it: the old code read
+            # product.price after the assignment, so old_price always equalled
+            # new_price in the response.
+            previous_price = product.price
+            logger.info(f"[PriceCollector] Price change detected for '{product.name}': {previous_price} -> {observed_price} {observed_currency}")
             product.price = observed_price
             product.currency = observed_currency
             product.updated_at = datetime.utcnow()
@@ -67,7 +71,7 @@ class PriceCollector:
             return {
                 "product_id": product.id,
                 "status": "price_updated",
-                "old_price": product.price,
+                "old_price": previous_price,
                 "new_price": observed_price,
                 "currency": observed_currency
             }

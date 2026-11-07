@@ -1,7 +1,7 @@
 import re
 import urllib.parse
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from bs4 import BeautifulSoup
 
 from connectors.base import BaseConnector
@@ -164,18 +164,51 @@ class EmagConnector(BaseConnector):
 
         return reviews
 
-    def _clean_price(self, price_raw: str) -> (Optional[float], str):
+    def _clean_price(self, price_raw: str) -> Tuple[Optional[float], str]:
         """
         Normalizes Romanian eMAG price formats such as:
-        '3.999,99 Lei' -> (3999.99, 'RON')
-        '1.49999 Lei'  -> (1499.99, 'RON')
+            '3.999,99 Lei'  -> (3999.99, 'RON')
+            '899,00 lei'    -> (899.0,   'RON')
+            '2 499 RON'     -> (2499.0,  'RON')   (space thousands separator)
+            '1.234,5 Lei'   -> (1234.5,  'RON')
+
+        The previous version only stripped dots, so a price written with a space
+        as the thousands separator ('2 499 RON') parsed as 2.0 and the product
+        was recorded at the wrong price.
         """
-        clean = price_raw.replace("Lei", "").replace("lei", "").replace("RON", "").strip()
-        # Remove dots used for thousands separator e.g. 3.999,99 -> 3999.99
-        clean = clean.replace(".", "").replace(",", ".")
+        if not price_raw:
+            return None, "RON"
+
+        clean = re.sub(r"(?i)\b(lei|ron)\b", "", price_raw)
+        # Drop every space, including the non-breaking space eMAG uses.
+        clean = clean.replace(" ", "").replace(" ", "").replace(" ", "").strip()
+
+        if not clean:
+            return None, "RON"
+
+        has_comma = "," in clean
+        has_dot = "." in clean
+
+        if has_comma and has_dot:
+            # 3.999,99 -> dots are thousands, comma is the decimal mark
+            clean = clean.replace(".", "").replace(",", ".")
+        elif has_comma:
+            # 899,00 -> comma is the decimal mark
+            clean = clean.replace(",", ".")
+        elif has_dot:
+            # A single dot is ambiguous. Three digits after the last dot means a
+            # thousands separator (3.999); anything else is a decimal mark.
+            head, _, tail = clean.rpartition(".")
+            if len(tail) == 3 and head.isdigit():
+                clean = clean.replace(".", "")
+            # else: keep the dot as the decimal mark
+
         match = re.search(r"(\d+(?:\.\d+)?)", clean)
         if match:
-            return float(match.group(1)), "RON"
+            try:
+                return float(match.group(1)), "RON"
+            except ValueError:
+                return None, "RON"
         return None, "RON"
 
     def _infer_brand(self, title: str) -> str:

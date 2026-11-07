@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     JSON,
+    Index,
     func
 )
 from sqlalchemy.orm import relationship
@@ -25,10 +26,12 @@ class Product(Base):
     currency = Column(String(10), default="RON", nullable=False)
     source = Column(String(100), nullable=True)
     source_url = Column(String(1000), nullable=True)
-    sku = Column(String(100), nullable=True, index=True)
+    sku = Column(String(100), nullable=True, index=True, unique=True)
     rating = Column(Float, nullable=True, default=0.0)
     review_count = Column(Integer, default=0)
     specs = Column(JSON, nullable=True)
+    # Release label shown in the UI ("Sep 2024"). NULL means "not known".
+    launch = Column(String(50), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, server_default=func.now())
     updated_at = Column(
@@ -85,10 +88,16 @@ class Review(Base):
     sentiment_score = Column(Float, nullable=True)  # Compound score: -1.0 to 1.0
     sentiment_label = Column(String(50), nullable=True)  # 'positive', 'neutral', 'negative'
     aspects = Column(JSON, nullable=True)  # e.g., {"battery": "positive", "price": "negative"}
+    # NULL = the source does not report it. 0 would mean "reported as zero".
+    helpful = Column(Integer, nullable=True)
     published_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, server_default=func.now())
 
     product = relationship("Product", back_populates="reviews")
+
+    __table_args__ = (
+        Index("ix_reviews_product_published", "product_id", "published_at"),
+    )
 
     def __repr__(self) -> str:
         return f"<Review(id={self.id}, product_id={self.product_id}, sentiment='{self.sentiment_label}')>"
@@ -108,3 +117,22 @@ class TrendMetric(Base):
 
     def __repr__(self) -> str:
         return f"<TrendMetric(category='{self.category}', keyword='{self.keyword}', score={self.trend_score})>"
+
+
+class LLMCache(Base):
+    """
+    Cached OpenRouter responses. The free tier allows ~1000 requests/day, so every
+    prompt is keyed by a hash of (model, prompt) and reused until it expires.
+    """
+    __tablename__ = "llm_cache"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    cache_key = Column(String(64), nullable=False, unique=True, index=True)
+    model = Column(String(200), nullable=False)
+    prompt = Column(Text, nullable=False)
+    response = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, server_default=func.now(), index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+
+    def __repr__(self) -> str:
+        return f"<LLMCache(key='{self.cache_key[:12]}…', model='{self.model}')>"

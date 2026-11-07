@@ -1,8 +1,7 @@
 import { ArrowDownRight, ArrowUpRight, AlertCircle, Boxes, Heart, Layers3, MessageSquareText, Sparkles, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
-import { BRANDS } from "../mocks/marketData.js";
+import { BRAND_COLORS } from "../constants/brands.js";
 
-export const BRAND_COLORS = Object.fromEntries(BRANDS.map(({ name, color }) => [name, color]));
 export const SENTIMENT_COLORS = { positive: "var(--positive)", neutral: "var(--neutral)", negative: "var(--negative)" };
 const kpiIcons = { layers: Layers3, message: MessageSquareText, heart: Heart, trend: TrendingUp };
 
@@ -17,13 +16,17 @@ export function PageHeading({ eyebrow, title, description, action }) {
 
 export function KpiCard({ label, value, suffix, change, note, tone = "positive", icon, spark = [] }) {
   const Icon = kpiIcons[icon] || TrendingUp;
-  const points = spark.map((point, index) => `${index * 100 / Math.max(spark.length - 1, 1)},${35 - point}`).join(" ");
+  const points = (spark || []).map((point, index) => `${index * 100 / Math.max((spark || []).length - 1, 1)},${35 - point}`).join(" ");
+  const hasChange = Boolean(change);
   return (
     <article className="kpi-card">
       <div className="kpi-top"><span>{label}</span><span className="kpi-icon"><Icon size={16} /></span></div>
       <div className="kpi-value-row"><strong className="metric">{value}</strong>{suffix && <span className="kpi-suffix">{suffix}</span>}</div>
-      <div className="kpi-bottom"><span className={`delta ${tone}`}>{change.startsWith("-") || change.startsWith("↓") ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{change}</span><span className="kpi-note">{note}</span></div>
-      <svg className="sparkline" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"><polyline points={points} fill="none" stroke={tone === "negative" ? "var(--negative)" : "var(--accent)"} strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg>
+      <div className="kpi-bottom">
+        {hasChange && <span className={`delta ${tone}`}>{change.startsWith("-") || change.startsWith("↓") ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{change}</span>}
+        {note && <span className="kpi-note">{note}</span>}
+      </div>
+      {points && <svg className="sparkline" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true"><polyline points={points} fill="none" stroke={tone === "negative" ? "var(--negative)" : "var(--accent)"} strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg>}
     </article>
   );
 }
@@ -36,13 +39,13 @@ export function SentimentBadge({ sentiment, children }) {
   return <span className={`sentiment-badge ${sentiment}`}>{children || sentiment}</span>;
 }
 
-export function BrandTag({ brand, compact = false }) {
-  const color = BRAND_COLORS[brand] || "var(--text-muted)";
-  return <span className={`brand-tag ${compact ? "compact" : ""}`}><span className="brand-dot" style={{ backgroundColor: color }} />{brand}</span>;
+export function BrandTag({ brand, color, compact = false }) {
+  const resolved = color || BRAND_COLORS[brand] || "var(--text-muted)";
+  return <span className={`brand-tag ${compact ? "compact" : ""}`}><span className="brand-dot" style={{ backgroundColor: resolved }} />{brand}</span>;
 }
 
 export function SourceTag({ source }) {
-  const symbols = { eMAG: "e", Reddit: "r", X: "𝕏", "Google Trends": "G" };
+  const symbols = { eMAG: "e", Reddit: "r", X: "𝕏", "Google Trends": "G", TechCommunity: "H" };
   return <span className={`source-tag source-${source?.toLowerCase().replace(" ", "-")}`}><span>{symbols[source] || "•"}</span>{source}</span>;
 }
 
@@ -73,8 +76,8 @@ export function InsightCard({ item }) {
   );
 }
 
-export function BrandLegend({ brands = BRANDS.map((item) => item.name) }) {
-  return <div className="brand-legend">{brands.map((brand) => <BrandTag key={brand} brand={brand} compact />)}</div>;
+export function BrandLegend({ brands = [], colors = {} }) {
+  return <div className="brand-legend">{brands.map((brand) => <BrandTag key={brand} brand={brand} color={colors[brand]} compact />)}</div>;
 }
 
 export function DataTable({ columns, rows, rowKey = "id", onRowClick, emptyTitle }) {

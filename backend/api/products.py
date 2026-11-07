@@ -15,6 +15,9 @@ from schemas.product import (
 )
 from schemas.price import PriceHistoryResponse
 from schemas.review import ReviewResponse
+from schemas.dto import ProductCard, ProductDetail, PricePoint, ProductReviewItem
+from services.analytics_service import analytics_service, brand_color
+from services.llm_service import llm_service
 from data_collection.reviews import review_collector
 from data_collection.prices import price_collector
 from connectors.emag import emag_connector
@@ -27,7 +30,74 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=List[ProductResponse])
+def _review_stats(reviews: List[ReviewModel]) -> dict:
+    """Shared review aggregation used by the card and the drawer."""
+    total = len(reviews)
+    counts = {"positive": 0, "neutral": 0, "negative": 0}
+    score_sum = 0.0
+    for review in reviews:
+        label = review.sentiment_label or "neutral"
+        if label not in counts:
+            label = "neutral"
+        counts[label] += 1
+        score_sum += review.sentiment_score or 0.0
+    return {
+        "total_reviews": total,
+        "positive": round(counts["positive"] / total * 100, 1) if total else 0.0,
+        "neutral": round(counts["neutral"] / total * 100, 1) if total else 0.0,
+        "negative": round(counts["negative"] / total * 100, 1) if total else 0.0,
+        "average_score": round(score_sum / total, 3) if total else 0.0,
+    }
+
+
+def _to_card(product: ProductModel, reviews: List[ReviewModel], history: List[PriceHistoryModel], max_reviews: int) -> ProductCard:
+    sentiment = analytics_service.product_sentiment(reviews)
+    aspects = analytics_service.aspect_breakdown(reviews)
+    pros, cons = analytics_service.pros_cons(aspects)
+    return ProductCard(
+        id=product.id,
+        name=product.name,
+        brand=product.brand,
+        category=product.category,
+        price=round(product.price, 2),
+        currency=product.currency or "RON",
+        rating=round(product.rating, 2) if product.rating is not None else None,
+        review_count=len(reviews) if reviews else (product.review_count or 0),
+        sentiment=sentiment,
+        change=analytics_service.price_change(history, product.price),
+        interest=analytics_service.product_interest(reviews, max_reviews),
+        color=brand_color(product.brand),
+        launch=product.launch,
+        specs=product.specs or {},
+        pros=pros,
+        cons=cons,
+        source=product.source,
+        source_url=product.source_url,
+    )
+
+
+def _load_relations(db: Session, product_ids: List[int]):
+    """Bulk-load reviews and price history for a set of products."""
+    reviews_by_product = {pid: [] for pid in product_ids}
+    if product_ids:
+        for review in db.query(ReviewModel).filter(ReviewModel.product_id.in_(product_ids)).all():
+            reviews_by_product.setdefault(review.product_id, []).append(review)
+
+    history_by_product = {pid: [] for pid in product_ids}
+    if product_ids:
+        rows = (
+            db.query(PriceHistoryModel)
+            .filter(PriceHistoryModel.product_id.in_(product_ids))
+            .order_by(PriceHistoryModel.recorded_at.asc())
+            .all()
+        )
+        for row in rows:
+            history_by_product.setdefault(row.product_id, []).append(row)
+
+    return reviews_by_product, history_by_product
+
+
+@router.get("/", response_model=List[ProductCard])
 def get_products(
     search: Optional[str] = Query(None, description="Search term for name or brand"),
     category: Optional[str] = Query(None, description="Filter by category"),
@@ -39,8 +109,8 @@ def get_products(
     db: Session = Depends(get_db)
 ):
     """
-    Retrieve and filter tech products stored in the database.
-    Supports full-text substring search, category, brand, and price boundaries.
+    Retrieve and filter tech products, enriched with derived sentiment,
+    price movement and aspect-based pros/cons.
     """
     query = db.query(ProductModel)
 
@@ -67,13 +137,78 @@ def get_products(
         query = query.filter(ProductModel.price <= max_price)
 
     products = query.order_by(ProductModel.id.asc()).offset(skip).limit(limit).all()
-    return products
+    if not products:
+        return []
+
+    ids = [p.id for p in products]
+    reviews_by_product, history_by_product = _load_relations(db, ids)
+
+    # Normalise interest against the busiest product in the whole catalogue.
+    max_reviews = max(
+        (len(v) for v in reviews_by_product.values()),
+        default=0,
+    )
+
+    return [
+        _to_card(
+            product,
+            reviews_by_product.get(product.id, []),
+            history_by_product.get(product.id, []),
+            max_reviews,
+        )
+        for product in products
+    ]
 
 
-@router.get("/{product_id}", response_model=ProductResponse)
+@router.get("/compare", response_model=List[ProductCard])
+def compare_products(
+    ids: str = Query(..., description="Comma-separated product ids, e.g. 1,2,3"),
+    db: Session = Depends(get_db)
+):
+    """
+    Return two to four products in the order requested, for the comparison table.
+    Unknown ids are skipped rather than failing the whole comparison.
+    """
+    try:
+        parsed = [int(part) for part in ids.split(",") if part.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="ids must be a comma-separated list of integers",
+        )
+
+    parsed = parsed[:4]
+    if len(parsed) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least two product ids are required for a comparison",
+        )
+
+    products = db.query(ProductModel).filter(ProductModel.id.in_(parsed)).all()
+    by_id = {p.id: p for p in products}
+    ordered = [by_id[pid] for pid in parsed if pid in by_id]
+    if not ordered:
+        return []
+
+    reviews_by_product, history_by_product = _load_relations(db, [p.id for p in ordered])
+    max_reviews = max((len(v) for v in reviews_by_product.values()), default=0)
+
+    return [
+        _to_card(
+            product,
+            reviews_by_product.get(product.id, []),
+            history_by_product.get(product.id, []),
+            max_reviews,
+        )
+        for product in ordered
+    ]
+
+
+@router.get("/{product_id}", response_model=ProductDetail)
 def get_product(product_id: int, db: Session = Depends(get_db)):
     """
-    Retrieve a single product by its primary key ID.
+    Full product detail for the drawer: card data, price history, a linear
+    forecast, the review list, and an LLM summary when the model is configured.
     """
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not product:
@@ -81,13 +216,82 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID {product_id} not found"
         )
-    return product
+
+    history = (
+        db.query(PriceHistoryModel)
+        .filter(PriceHistoryModel.product_id == product.id)
+        .order_by(PriceHistoryModel.recorded_at.asc())
+        .all()
+    )
+    reviews = (
+        db.query(ReviewModel)
+        .filter(ReviewModel.product_id == product.id)
+        .order_by(ReviewModel.published_at.desc())
+        .all()
+    )
+
+    max_reviews = max(
+        (db.query(ReviewModel).filter(ReviewModel.product_id == pid).count()
+         for (pid,) in db.query(ProductModel.id).all()),
+        default=0,
+    )
+    card = _to_card(product, reviews, history, max_reviews)
+
+    price_points = [
+        PricePoint(date=row.recorded_at.strftime("%b %d"), price=round(row.price, 2))
+        for row in history
+    ]
+
+    # Linear projection from the stored points, not a fabricated curve.
+    forecast: List[PricePoint] = []
+    if len(history) >= 2:
+        from services.forecasting import forecasting_service
+        prices = [row.price for row in history]
+        projection = forecasting_service.forecast_next_period(prices, periods_ahead=30)
+        last_date = history[-1].recorded_at
+        from datetime import timedelta
+        forecast = [
+            PricePoint(date=(last_date + timedelta(days=30)).strftime("%b %d"), price=projection["projected_price"])
+        ]
+
+    review_items = [
+        ProductReviewItem(
+            id=review.id,
+            author=review.author or "Anonymous",
+            rating=review.rating,
+            title=review.title,
+            text=review.content,
+            sentiment=review.sentiment_label or "neutral",
+            sentiment_score=review.sentiment_score,
+            source=review.source,
+            date=(review.published_at or review.created_at).strftime("%b %d, %Y")
+            if (review.published_at or review.created_at) else "",
+            aspects=review.aspects or {},
+        )
+        for review in reviews[:20]
+    ]
+
+    stats = _review_stats(reviews)
+    stats["aspects"] = {
+        name: data["score"] for name, data in analytics_service.aspect_breakdown(reviews).items()
+    }
+    summary = llm_service.review_summary(product.name, product.brand, stats, db)
+
+    return ProductDetail(
+        product=card,
+        price_history=price_points,
+        forecast=forecast,
+        reviews=review_items,
+        review_summary=summary,
+        review_summary_source="llm" if summary else "unavailable",
+    )
 
 
 @router.get("/{product_id}/detail", response_model=ProductDetailResponse)
 def get_product_detail(product_id: int, db: Session = Depends(get_db)):
     """
-    Retrieve deep product details including historical price changes and customer reviews.
+    Raw ORM detail (price history + reviews) kept for backwards compatibility
+    with the original backend contract.
     """
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not product:
@@ -101,7 +305,7 @@ def get_product_detail(product_id: int, db: Session = Depends(get_db)):
 @router.post("/", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 def create_product(product_data: ProductCreate, db: Session = Depends(get_db)):
     """
-    Create a new product in the database and automatically register its initial price record.
+    Create a new product and register its initial price record.
     """
     product_dict = product_data.model_dump()
     new_product = ProductModel(**product_dict)
@@ -110,13 +314,11 @@ def create_product(product_data: ProductCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_product)
 
-    # Automatically initialize first price snapshot in price_history
-    initial_price_entry = PriceHistoryModel(
+    db.add(PriceHistoryModel(
         product_id=new_product.id,
         price=new_product.price,
         currency=new_product.currency
-    )
-    db.add(initial_price_entry)
+    ))
     db.commit()
     db.refresh(new_product)
 
@@ -131,23 +333,25 @@ def create_product(product_data: ProductCreate, db: Session = Depends(get_db)):
 )
 def import_product_from_emag(
     query: str = Query(..., min_length=2, description="Product search term (e.g. 'iPhone 15', 'RTX 4070')"),
-    category: Optional[str] = Query(None, description="Override category (defaults to auto-detected or Smartphone)"),
+    category: Optional[str] = Query(None, description="Override category (defaults to auto-detected or Technology)"),
     db: Session = Depends(get_db)
 ):
     """
-    Searches eMAG public catalog live, retrieves genuine retail price, rating,
-    review volume, and product URL, then registers the product in MarketPulse AI.
+    Searches the eMAG public catalogue live and registers the best match.
+    Returns 503 with an explicit reason when eMAG cannot be reached — it never
+    fabricates a product.
     """
     results = emag_connector.search_products(query, limit=5)
     if not results:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No products found on eMAG for query: '{query}'"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"eMAG returned no parseable results for '{query}'. "
+                "The public catalogue may be rate-limiting this IP or the page layout changed."
+            )
         )
 
     best = results[0]
-
-    # Inferred category if not provided
     detected_cat = category or ("Smartphone" if "telefon" in best["name"].lower() or "iphone" in best["name"].lower() or "galaxy" in best["name"].lower() else "Technology")
 
     new_product = ProductModel(
@@ -166,13 +370,11 @@ def import_product_from_emag(
     db.commit()
     db.refresh(new_product)
 
-    # Initial price point
-    initial_price_entry = PriceHistoryModel(
+    db.add(PriceHistoryModel(
         product_id=new_product.id,
         price=new_product.price,
         currency=new_product.currency
-    )
-    db.add(initial_price_entry)
+    ))
     db.commit()
     db.refresh(new_product)
 
@@ -199,15 +401,13 @@ def update_product(
 
     update_dict = update_data.model_dump(exclude_unset=True)
 
-    # Track price modification in history
     new_price = update_dict.get("price")
     if new_price is not None and new_price != product.price:
-        price_snapshot = PriceHistoryModel(
+        db.add(PriceHistoryModel(
             product_id=product.id,
             price=new_price,
             currency=update_dict.get("currency", product.currency)
-        )
-        db.add(price_snapshot)
+        ))
 
     for field, val in update_dict.items():
         setattr(product, field, val)

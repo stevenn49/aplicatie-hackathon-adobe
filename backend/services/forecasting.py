@@ -32,8 +32,11 @@ class PriceForecastingService:
         max_price = max(prices)
         avg_price = sum(prices) / len(prices)
 
-        # Calculate percentage change from first recorded price to current
-        oldest_price = prices[-1] if len(prices) > 1 else current_price
+        # Calculate percentage change from the FIRST recorded price to current.
+        # `prices` arrives ordered ascending by recorded_at, so the oldest point is
+        # index 0. Using [-1] here compared the newest point against itself and
+        # always produced ~0 %.
+        oldest_price = prices[0] if len(prices) > 1 else current_price
         if oldest_price > 0:
             change_pct = ((current_price - oldest_price) / oldest_price) * 100.0
         else:

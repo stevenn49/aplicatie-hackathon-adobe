@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from config import settings
-from database.connection import init_db, get_db, SessionLocal
+from database.connection import init_db, get_db, SessionLocal, ping_db
 from database.seeds import seed_database_if_empty
 from api.products import router as products_router
 from api.analytics import router as analytics_router
+from api.marketing import router as marketing_router
 
 # Setup structured logging
 logging.basicConfig(
@@ -23,12 +24,11 @@ logger = logging.getLogger("marketpulse.main")
 async def lifespan(app: FastAPI):
     """
     Application lifecycle management:
-    Initializes database schema and populates baseline tech intelligence dataset.
+    Initializes the MySQL schema and populates the baseline dataset when empty.
     """
     logger.info("Initializing MarketPulse AI Backend...")
     init_db()
 
-    # Seed baseline dataset if empty
     db = SessionLocal()
     try:
         seed_database_if_empty(db)
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     description="Market Intelligence API for technology products, consumer sentiment, price evolution, and trends.",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan
 )
 
@@ -59,6 +59,7 @@ app.add_middleware(
 # Register API Routers
 app.include_router(products_router)
 app.include_router(analytics_router)
+app.include_router(marketing_router)
 
 
 @app.get("/", tags=["General"])
@@ -68,7 +69,7 @@ def root():
     """
     return {
         "name": settings.APP_NAME,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "operational",
         "documentation": "/docs",
         "openapi_schema": "/openapi.json"
@@ -90,7 +91,10 @@ def health_check(db: Session = Depends(get_db)):
     return {
         "status": "online",
         "database": db_status,
-        "environment": settings.APP_ENV
+        "database_backend": settings.DATABASE_URL.split("://")[0],
+        "environment": settings.APP_ENV,
+        "llm": "configured" if settings.llm_enabled else "not configured",
+        "llm_model": settings.OPENROUTER_MODEL or None,
     }
 
 
