@@ -4,6 +4,7 @@ import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, Minus, Plus, Search, 
 import { getProductComparison, getProductDetail, getProducts } from "../services/api.js";
 import { useFetch } from "../hooks/useFetch.js";
 import { useFilters } from "../context/AppContext.jsx";
+import { ChartData } from "../context/ChatContext.jsx";
 import { BrandTag, ChartCard, DataTable, EmptyState, ErrorState, PageHeading, PageLoading, SentimentBadge } from "../components/common.jsx";
 import { ChartTooltip, ResponsiveChart, axisProps, chartMargin, gridProps } from "../components/charts.jsx";
 import { formatMoney, formatNumber } from "../constants/brands.js";
@@ -152,6 +153,7 @@ export default function ProductAnalysis() {
             ))}
           </div>
         </div>
+        <ChartData title="Product catalogue" subtitle="Every tracked product with price, rating, sentiment and price trend" data={rows.map(({ name, brand, category, price, currency, rating, sentiment, change, review_count }) => ({ name, brand, category, price, currency, rating, sentiment, change, review_count }))} />
         <DataTable columns={columns} rows={rows} onRowClick={(item) => setSelectedId(item.id)} />
         <div className="table-footer">
           <span>Showing <strong>{rows.length}</strong> of <strong>{listState.data.length}</strong> products</span>
@@ -208,6 +210,7 @@ export default function ProductAnalysis() {
                         </div>
                       ))}
                     </div>
+                    <ChartData title="Product comparison" subtitle="Products selected for side-by-side comparison" data={comparison.map(({ name, brand, price, currency, rating, sentiment, change }) => ({ name, brand, price, currency, rating, sentiment, change }))} />
                     <div className="comparison-radar">
                       <h3>At a glance</h3>
                       <ResponsiveChart height={230}>
@@ -264,7 +267,12 @@ export default function ProductAnalysis() {
                         )}
                       </div>
 
-                      <ChartCard title="Price history" subtitle={detail.forecast.length ? "Recorded points and a linear 30-day projection" : "Recorded points"}>
+                      <ChartCard
+                        title="Price history"
+                        subtitle={detail.forecast.length ? "Recorded points and a linear 30-day projection" : "Recorded points"}
+                        data={[...detail.price_history.map((point) => ({ date: point.date, actual: point.price })), ...detail.forecast.map((point) => ({ date: point.date, forecast: point.price }))]}
+                        note={`Product: ${detail.product.name}`}
+                      >
                         {detail.price_history.length ? (
                           <>
                             <ResponsiveChart height={200}>

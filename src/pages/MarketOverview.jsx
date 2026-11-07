@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { getBrandStats, getMarketOverview, getProducts } from "../services/api.js";
 import { useFetch } from "../hooks/useFetch.js";
 import { useFilters } from "../context/AppContext.jsx";
+import { ChartData } from "../context/ChatContext.jsx";
 import { BrandTag, ChartCard, EmptyState, ErrorState, KpiCard, PageHeading, PageLoading, SentimentBadge, SourceTag } from "../components/common.jsx";
 import { ChartAxes, ChartTooltip, ResponsiveChart, chartMargin } from "../components/charts.jsx";
 import { formatMoney } from "../constants/brands.js";
@@ -44,6 +45,7 @@ export default function MarketOverview() {
         description="A clear view of what's moving across the tech landscape."
         action={<span className="freshness-pill"><span className="live-dot" /> Live market pulse</span>}
       />
+      <ChartData title="KPI summary" subtitle="Headline KPIs at the top of the overview" data={data.kpis} />
 
       <div className="kpi-grid">
         {data.kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
@@ -70,6 +72,7 @@ export default function MarketOverview() {
         <ChartCard
           title="Conversation volume over time"
           subtitle="Weekly review mentions per brand, indexed to 100"
+          data={data.evolution}
           action={<div className="chart-period-label"><span className="live-dot" /> From stored reviews</div>}
           className="evolution-card"
         >
@@ -88,7 +91,7 @@ export default function MarketOverview() {
           ) : <EmptyState title="No review history yet" description="Collect reviews for at least one product and the timeline will appear." />}
         </ChartCard>
 
-        <ChartCard title="Share of voice" subtitle="Brand conversation volume">
+        <ChartCard title="Share of voice" subtitle="Brand conversation volume (%)" data={share}>
           {share.length ? (
             <>
               <div className="share-chart-wrap">
@@ -120,6 +123,7 @@ export default function MarketOverview() {
         <ChartCard
           title="Top movers"
           subtitle="Biggest price shifts since the first recorded point"
+          data={data.topMovers?.map(({ name, brand, category, change }) => ({ name, brand, category, change }))}
           action={<Link className="text-link" to="/products">All products <ExternalLink size={13} /></Link>}
           className="movers-card"
         >
@@ -149,6 +153,7 @@ export default function MarketOverview() {
         <ChartCard
           title="Notable mentions"
           subtitle="High-signal conversations across your sources"
+          data={data.mentions.map(({ brand, text, sentiment, source, time }) => ({ brand, text, sentiment, source, time }))}
           action={<span className="live-status"><span className="live-dot" /> LIVE</span>}
           className="mentions-card"
         >

@@ -171,8 +171,6 @@ npx playwright test
 
 ---
 
-## Routes
-
 | Path | Page |
 | --- | --- |
 | `/` | Market Overview |
@@ -184,23 +182,64 @@ npx playwright test
 | `/competitors` | Competitor Analysis |
 | `/recommendations` | AI Recommendations |
 
----
 
-## Troubleshooting
+`backend/` is a Python service that generates marketing advice from the dashboard data using a local model on [Ollama](https://ollama.com). Groq and Gemini (free API keys) are supported as alternatives via `AI_PROVIDER`.
 
-**`DATABASE_URL must be a MySQL URL`** — `backend/.env` still holds the old
-SQLite value. Re-run the setup script or edit the line.
+### Setup
 
-**`Can't connect to MySQL server`** — the container is not running
-(`docker compose up -d`) or the native server is stopped. Check with
-`docker ps` / `mysqladmin ping`.
+1. Install [Ollama](https://ollama.com) and pull a model: `ollama pull llama3.2`.
+2. Install and configure the backend:
 
-**The dashboard shows "We couldn't load this data"** — the API is unreachable.
-Check `http://127.0.0.1:8010/health` and that `VITE_API_URL` in `.env.local`
-matches the backend port.
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env          # macOS/Linux: cp .env.example .env
+# AI_PROVIDER=ollama is the default; set AI_MODELS to pin a model
+```
 
-**`Port 8010 is already in use`** — pass a different port to the start script and
-update `VITE_API_URL`.
+### Command-line script
 
-**eMAG import returns 503** — the public catalogue is rate-limiting or its page
-layout changed. The API reports this explicitly rather than inventing a product.
+```bash
+python marketing_advisor.py "How should Samsung respond to charging-speed complaints?"
+python marketing_advisor.py --brand Sony "Plan a launch campaign for the WH-1000XM6"
+python marketing_advisor.py --recommendations --brand NVIDIA   # JSON in the dashboard's format
+python marketing_advisor.py --chat                             # interactive conversation
+python marketing_advisor.py --list-models                      # models available from the provider
+```
+
+### Connect it to the dashboard
+
+```bash
+uvicorn server:app --reload --port 8000     # from backend/
+```
+
+Then set `VITE_AI_API_URL=http://localhost:8000` in `.env.local` and run `npm run dev`. The AI Recommendations page now shows model-generated recommendations (cached for 10 minutes). If the backend is unavailable, the page falls back to the mock recommendations.
+
+Endpoints: `GET /analytics/recommendations?category=Marketing&brand=Apple`, `POST /ai/advice` (`{"question": "...", "brand": "Apple"}`), `GET /health`.
+
+### In-app assistant chat (Ollama)
+
+Every page has an **Ask AI** button (bottom right) and every chart has an **Analyse** button. The assistant sees the data of all charts on the current page plus the active filters, and can analyse charts, suggest marketing ideas, plan campaigns, build content calendars, write copy, compare competitors, analyse sentiment and summarise pages. Follow-up questions keep the conversation context.
+
+Run it fully locally with [Ollama](https://ollama.com):
+
+```bash
+ollama pull llama3.2                       # or a bigger model, e.g. llama3.1:8b
+# backend/.env
+AI_PROVIDER=ollama
+AI_MODELS=llama3.2
+# .env.local
+VITE_AI_API_URL=http://localhost:8000
+```
+
+How it works (`backend/assistant.py`, endpoint `POST /ai/chat`, streamed plain text):
+1. Charts register their rows with the chat (`ChartCard data={...}` or `<ChartData />`, see `src/context/ChatContext.jsx`).
+2. The backend detects the intent of the message and picks an answer format.
+3. For each chart it pre-computes exact facts (rankings, gaps, averages, % change, peaks), so small models quote correct numbers instead of doing arithmetic.
+4. Prompt = role + market data snapshot + page/filters + chart facts and data + task; when analysing a single chart only that chart is sent. Ollama is called with an 8k context (`OLLAMA_NUM_CTX`).
+
+The model reads `backend/market_data.json`, a static snapshot that predates the MySQL integration. It is **not** connected to the live database: the assistant's narrative is grounded in that file, while the numbers on the dashboard come from MySQL. Regenerate it, or point the assistant at the API, if you need the two to agree. To pin specific models, set `AI_MODELS` in `backend/.env` (comma-separated, tried in order).
+
+**Note on ports.** The main API runs on **8010** (port 8000 is taken on the development machine). The separate AI service in `backend/server.py` is a different app and defaults to 8000; set `VITE_AI_API_URL` to wherever you start it. If both must run, start the AI service on another port, e.g. `uvicorn server:app --port 8020`.

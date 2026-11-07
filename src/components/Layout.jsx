@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Activity, ArrowUpRight, BarChart3, ChevronLeft, ChevronRight, Command, Cpu, Headphones, LayoutDashboard, Menu, MessageCircle, Moon, Search, Sparkles, Sun, Users } from "lucide-react";
 import FilterBar from "./FilterBar.jsx";
+import AssistantChat from "./AssistantChat.jsx";
 import { useTheme } from "../context/AppContext.jsx";
 import { apiBaseUrl, getHealth, getRecommendations } from "../services/api.js";
 
@@ -23,6 +24,7 @@ export default function Layout() {
   const [recommendationCount, setRecommendationCount] = useState(null);
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const pageTitle = navItems.find((item) => item.end ? location.pathname === item.to : location.pathname.startsWith(item.to))?.label || "Dashboard";
 
   useEffect(() => { setMobileOpen(false); window.scrollTo({ top: 0, behavior: "smooth" }); }, [location.pathname]);
 
@@ -110,6 +112,7 @@ export default function Layout() {
           <span><Search size={13} /> {health ? `${health.llm === "configured" ? "LLM connected" : "LLM not configured"} · ${health.database_backend}` : "API unreachable"} <span className={databaseOk ? "live-dot" : "live-dot offline"} /></span>
         </footer>
       </div>
+      <AssistantChat pageTitle={pageTitle} pagePath={location.pathname} />
     </div>
   );
 }

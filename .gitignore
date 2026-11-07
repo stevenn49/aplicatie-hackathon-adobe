@@ -8,6 +8,7 @@ dist/
 
 # Backend / Python
 backend/venv/
+.venv/
 backend/.env
 backend/*.db
 backend/*.sqlite3
