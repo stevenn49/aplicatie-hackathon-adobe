@@ -164,6 +164,16 @@ export const apiBaseUrl = API_URL;
 const AI_API_URL = (import.meta.env.VITE_AI_API_URL || "").replace(/\/+$/, "");
 
 // In-app assistant (backend/assistant.py). Streams Markdown; onText receives the full text so far.
+//
+// onText is throttled. The backend emits one chunk per token, and every chunk
+// used to trigger a React render that re-parsed the whole accumulated Markdown
+// from scratch — so a long answer cost O(chunks × length) parsing work and
+// allocated a fresh element tree each time. That is what exhausted the tab's
+// memory. Emitting at most every STREAM_THROTTLE_MS keeps the text identical
+// (the final flush always delivers the complete answer) while cutting the
+// number of renders by one to two orders of magnitude.
+const STREAM_THROTTLE_MS = 80;
+
 export async function streamAssistantChat(payload, onText, signal) {
   if (!AI_API_URL) throw new Error("Set VITE_AI_API_URL in .env.local and start the backend to use the assistant.");
   let response;
@@ -178,12 +188,43 @@ export async function streamAssistantChat(payload, onText, signal) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let text = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    text += decoder.decode(value, { stream: true });
+  let lastEmit = 0;
+  let timer = null;
+
+  const emit = () => {
+    lastEmit = Date.now();
     onText(text, meta);
+  };
+  const emitThrottled = () => {
+    const wait = STREAM_THROTTLE_MS - (Date.now() - lastEmit);
+    if (wait <= 0) { emit(); return; }
+    if (timer !== null) return;
+    timer = setTimeout(() => { timer = null; emit(); }, wait);
+  };
+  const clear = () => { if (timer !== null) { clearTimeout(timer); timer = null; } };
+
+  try {
+    for (;;) {
+      if (signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      emitThrottled();
+    }
+  } finally {
+    clear();
+    // Release the connection even when the loop ended through the abort path,
+    // so the browser stops buffering a body nobody will read.
+    try { await reader.cancel(); } catch { /* already closed */ }
   }
+
+  if (signal?.aborted) {
+    const abort = new Error("The request was aborted.");
+    abort.name = "AbortError";
+    throw abort;
+  }
+
+  emit();
   return { text, ...meta };
 }
 

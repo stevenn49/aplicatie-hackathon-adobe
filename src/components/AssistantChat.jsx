@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 import { BarChart3, Lightbulb, Megaphone, PenLine, RotateCcw, Send, Sparkles, Square, Swords, FileText, X } from "lucide-react";
 import { useChat, useRegisteredCharts } from "../context/ChatContext.jsx";
 import { useFilters } from "../context/AppContext.jsx";
@@ -31,7 +31,9 @@ function inline(text) {
   });
 }
 
-function Markdown({ text }) {
+// Memoised: without this, every streamed chunk re-parsed every earlier message
+// in the conversation as well as the one being written.
+const Markdown = memo(function Markdown({ text }) {
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks = [];
   let i = 0;
@@ -67,7 +69,7 @@ function Markdown({ text }) {
     blocks.push(<p key={`p${i}`}>{inline(para.join(" "))}</p>);
   }
   return <div className="chat-markdown">{blocks}</div>;
-}
+});
 
 // ---------------------------------------------------------------- chat panel
 export default function AssistantChat({ pageTitle, pagePath }) {
@@ -102,7 +104,12 @@ export default function AssistantChat({ pageTitle, pagePath }) {
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
-    const update = (patch) => setMessages((current) => current.map((m, idx) => idx === current.length - 1 ? { ...m, ...patch } : m));
+    // A chunk that arrives after the user pressed Stop must not resurrect the
+    // message that stop() already marked as stopped.
+    const update = (patch) => {
+      if (controller.signal.aborted) return;
+      setMessages((current) => current.map((m, idx) => idx === current.length - 1 ? { ...m, ...patch } : m));
+    };
     try {
       await streamAssistantChat({
         message, history, brand: filters.brand, focusChart,
@@ -111,18 +118,32 @@ export default function AssistantChat({ pageTitle, pagePath }) {
       }, (content, meta) => update({ content, intent: meta.intent, model: meta.model, pending: false }), controller.signal);
       update({ pending: false });
     } catch (error) {
-      if (error.name === "AbortError") update({ pending: false, stopped: true });
-      else update({ pending: false, error: true, content: error.message });
+      // stop() has already marked the message; anything else is a real failure.
+      if (error.name !== "AbortError") update({ pending: false, error: true, content: error.message });
     } finally {
-      abortRef.current = null;
-      setBusy(false);
+      // Only the request that still owns the ref may clear it — a Stop
+      // followed immediately by a new question must not be un-busied by the
+      // old request finishing.
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setBusy(false);
+      }
     }
   }, [filters, pagePath, pageTitle]);
 
   // Requests coming from "Analyse" buttons on chart cards.
   useEffect(() => { if (request) send(request.message, request.focusChart); }, [request]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const stop = () => abortRef.current?.abort();
+  // Stop must be self-contained: it marks the message and releases the button
+  // immediately, instead of waiting for the aborted fetch to reject.
+  const stop = useCallback(() => {
+    const controller = abortRef.current;
+    if (!controller) return;
+    abortRef.current = null;
+    controller.abort();
+    setBusy(false);
+    setMessages((current) => current.map((m, idx) => idx === current.length - 1 ? { ...m, pending: false, stopped: true } : m));
+  }, []);
   const reset = () => { stop(); setMessages([]); };
   const onSubmit = (event) => { event.preventDefault(); send(input); };
   const onKeyDown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(input); } };
