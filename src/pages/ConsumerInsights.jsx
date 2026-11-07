@@ -12,7 +12,10 @@ const DRIVER_COLORS = ["#a6e06c", "#f3bb6a", "#a39af9", "#73baf5", "#f08399", "#
 export default function ConsumerInsights() {
   const { filters } = useFilters();
   const segmentsState = useFetch(() => getConsumerSegments(filters), [filters.brand]);
-  const sentimentState = useFetch(() => getSentiment(filters), [filters.brand]);
+  // getSentiment sends both brand and source, so both must be dependencies:
+  // with only `brand` here, changing the source filter left the previous
+  // response on screen (the "Based on N reviews" footnote never moved).
+  const sentimentState = useFetch(() => getSentiment(filters), [filters.brand, filters.source]);
   const [activeSegment, setActiveSegment] = useState(null);
 
   if (segmentsState.loading || sentimentState.loading) return <PageLoading />;

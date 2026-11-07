@@ -228,13 +228,9 @@ export async function streamAssistantChat(payload, onText, signal) {
   return { text, ...meta };
 }
 
-export async function askMarketingAdvisor(question, brand, history = []) {
-  if (!AI_API_URL) throw new Error("Set VITE_AI_API_URL to use the marketing advisor");
-  const response = await fetch(`${AI_API_URL}/ai/advice`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, brand: brand === "All brands" ? null : brand, history }),
-  });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `Request failed (${response.status})`);
-  return response.json();
-}
+// `askMarketingAdvisor` used to live here, calling POST {AI_API_URL}/ai/advice.
+// Nothing in src/ ever imported it: the panel below is the only assistant the
+// dashboard offers, and it streams from /ai/chat with the same intents (ideas,
+// campaign, copy, competitor). Keeping a second, non-streaming client for the
+// same model was dead code, so it was removed. The backend endpoint is
+// untouched — backend/marketing_advisor.py still calls advisor.get_advice.

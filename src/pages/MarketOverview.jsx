@@ -7,7 +7,7 @@ import { useFetch } from "../hooks/useFetch.js";
 import { useFilters } from "../context/AppContext.jsx";
 import { ChartData } from "../context/ChatContext.jsx";
 import { BrandTag, ChartCard, EmptyState, ErrorState, KpiCard, PageHeading, PageLoading, SentimentBadge, SourceTag } from "../components/common.jsx";
-import { ChartAxes, ChartTooltip, ResponsiveChart, chartMargin } from "../components/charts.jsx";
+import { ChartTooltip, ResponsiveChart, chartAxes, chartMargin } from "../components/charts.jsx";
 import { formatMoney } from "../constants/brands.js";
 
 const today = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
@@ -80,9 +80,9 @@ export default function MarketOverview() {
             <>
               <ResponsiveChart height={286}>
                 <LineChart data={data.evolution} margin={chartMargin}>
-                  <ChartAxes xKey="month" />
+                  {chartAxes("month", { yDomain: [0, 100] })}
                   {evolutionKeys.map((brand) => (
-                    <Line key={brand} type="monotone" dataKey={brand} stroke={colorFor(brand)} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} connectNulls />
+                    <Line key={brand} type="linear" dataKey={brand} stroke={colorFor(brand)} strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
                   ))}
                 </LineChart>
               </ResponsiveChart>

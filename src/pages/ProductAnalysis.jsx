@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Area, AreaChart, CartesianGrid, Cell, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart, Tooltip, XAxis, YAxis } from "recharts";
 import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, Download, Minus, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import {
@@ -41,6 +42,20 @@ function validate(form) {
     }
   }
   return errors;
+}
+
+/**
+ * Drawers are portalled to <body>.
+ *
+ * `.page` carries `animation: page-in .24s ease both`; the fill mode keeps the
+ * final keyframe applied, and that keyframe still resolves to a transform
+ * (matrix(1,0,0,1,0,0)). A transformed ancestor becomes the containing block for
+ * `position: fixed` descendants, so the backdrop was laid out inside the page
+ * column instead of the viewport: it started below the topbar, never covered the
+ * sidebar, and its height was the page height rather than the screen height.
+ */
+function DrawerPortal({ children }) {
+  return createPortal(children, document.body);
 }
 
 function ProductForm({ product, onClose, onSaved }) {
@@ -90,6 +105,7 @@ function ProductForm({ product, onClose, onSaved }) {
   };
 
   return (
+    <DrawerPortal>
     <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="product-drawer" role="dialog" aria-modal="true" aria-label={product ? "Edit product" : "Add product"}>
         <div className="drawer-header">
@@ -152,6 +168,7 @@ function ProductForm({ product, onClose, onSaved }) {
         </form>
       </aside>
     </div>
+    </DrawerPortal>
   );
 }
 
@@ -449,6 +466,7 @@ export default function ProductAnalysis() {
       </div>
 
       {selectedId && (
+        <DrawerPortal>
         <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
           <aside className="product-drawer" role="dialog" aria-modal="true" aria-label="Product details">
             <div className="drawer-header">
@@ -543,7 +561,11 @@ export default function ProductAnalysis() {
                           </p>
                         )}
                         <div>
-                          <SentimentBadge sentiment={detail.product.sentiment >= 70 ? "positive" : detail.product.sentiment >= 45 ? "neutral" : "negative"} />
+                          {/* `null >= 70` and `null >= 45` are both false, so a product
+                              with no reviews used to be labelled "negative". */}
+                          {detail.product.sentiment === null
+                            ? <SentimentBadge sentiment="neutral">no reviews</SentimentBadge>
+                            : <SentimentBadge sentiment={detail.product.sentiment >= 70 ? "positive" : detail.product.sentiment >= 45 ? "neutral" : "negative"} />}
                           <strong>{detail.product.sentiment === null ? "—" : `${detail.product.sentiment.toFixed(0)}/100`}</strong> average sentiment
                         </div>
                       </div>
@@ -565,6 +587,7 @@ export default function ProductAnalysis() {
             </div>
           </aside>
         </div>
+        </DrawerPortal>
       )}
 
       {formOpen && (
