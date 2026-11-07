@@ -4,8 +4,9 @@ Read-only investigation for the next product step: turn the existing "Ask AI" as
 AI Marketing Strategist & Data Analyst. No code was changed, no commit was made, no service was started.
 CONFIRMED = ran it or read the exact line, output shown; UNVERIFIED = inferred, not proven; NOT DONE = skipped, and why.
 
-The requirements in §1 are the user's words, verbatim (translated where Romanian prose was quoted),
-and every one of them is treated as a requirement in §2–§5.
+§1 reproduces the user's requirement list in full, rendered in English from the Romanian original (meaning
+preserved, not a literal translation); every point is treated as a requirement in §2–§5. The user's own
+Romanian wording is quoted where the exact phrasing matters.
 
 ---
 
@@ -24,7 +25,7 @@ are the visible transformation. 10 numbered questions for the user are in §7.
 
 ---
 
-## 1. The problem as reported (verbatim requirements)
+## 1. The problem as reported (the user's full requirement list)
 
 > "I'd take the MarketPulse AI chatbot much further than a simple assistant that answers questions. I'd turn it
 > into an AI Marketing Strategist & Data Analyst — a virtual consultant that can interpret market data, explain
@@ -614,7 +615,7 @@ strategy with evidence, and moves the user around the app.
 | 6 | UI actions act on stale page state | Actions carry a page path; the runner ignores an action whose page is not mounted; no destructive verbs |
 | 7 | Streaming re-parses the whole Markdown per chunk (today's O(n²)) | Incremental block parsing + 60 ms throttle + a cursor (§5.4) |
 | 8 | The panel covers the dashboard on small screens | `margin-right` on the main column, drawer below 1100px, full screen below 760px |
-| 9 | A new endpoint drifts from the frontend contract (the historical failure mode, WORKING-NOTES IX.4) | Extend `test_contracts.py` with the new endpoints and the SSE event shapes |
+| 9 | A new endpoint drifts from the frontend contract (the historical failure mode, WORKING-NOTES IX.4) | Extend `backend/tests/test_api.py` (the contract suite) with the new endpoints and the SSE event shapes |
 | 10 | The tool layer becomes a second business-logic copy of `analytics_service` | Tools call the service functions; they never re-implement a metric |
 
 ---
@@ -725,5 +726,26 @@ Fiecare întrebare are o recomandare. Răspunde „toate recomandările" dacă e
 - `.orchestration/specs/004-ai-strategist-chatbot.md` — this file, the only thing written.
 - Nothing else created, deleted or modified. No processes started; the three running services were only read
   with GET requests and left exactly as found.
+
+by FiredMosquito831
+
+## USER DECISIONS (2026-11-07 17:51, binding)
+
+Utilizatorul a răspuns: **„all rec"** — acceptă toate cele 10 recomandări din acest spec.
+
+Deciziile rezultate, în ordinea în care se implementează:
+
+1. **Q1 — Prioritatea modulelor.** B (Chart Intelligence) primul, apoi A (Strategy), apoi E (Campaign), apoi C și D împreună.
+2. **Q2 — Amplasarea panoului.** Ambele: overlay flotant implicit, plus un control „pin to side" în header. Butonul Ask AI existent rămâne neschimbat.
+3. **Q3 — Controlul platformei.** Nivel (b): acțiuni declarative, pe whitelist, randate ca chips-uri și executate doar la click-ul utilizatorului. Niciodată execuție directă de către model.
+4. **Q4 — Model și latență.** Modelul free rămâne implicit; un toggle „Deep reasoning" per cerere comută pe un model mai puternic pentru planificare și strategie. Niciodată blocarea UI-ului.
+5. **Q5 — Date lipsă.** Se afișează „Not enough data" și se numește ce lipsește. Niciodată 0, niciodată o cifră inventată.
+6. **Q6 — Librării noi.** Niciuna pentru acum. Agregatele se calculează în SQL și în stdlib. MySQL rămâne.
+7. **Q7 — Streaming.** Randare îmbogățită: append pe delta, cursor de typing, blocuri de cod, linkuri, citări, tabele bufferizate, buton de copiere.
+8. **Q8 — Persistența conversației.** Rămâne de confirmat din textul întrebării; se aplică recomandarea agentului.
+9. **Q9 — Comportamentul pe eroare.** Fallback la modelul free, cu etichetă vizibilă în UI.
+10. **Q10 — Ordinea de livrare.** Cele trei felii din §5.4, cea mai mică prima.
+
+**Consecință:** implementarea începe cu feliile 0 și 1. Restul intră în QUEUE.md.
 
 by FiredMosquito831

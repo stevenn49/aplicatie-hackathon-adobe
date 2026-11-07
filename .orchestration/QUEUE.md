@@ -22,13 +22,25 @@ What the user owes: nothing right now. What is next: read the three reports, ver
 
 ## QUEUED (in order)
 
+**The user answered `all rec` at 2026-11-07 17:51.** Both specs carry a binding `USER DECISIONS` block. The order below follows those decisions.
+
 | # | Item | Version / note | Spec + user decisions | What it does and why |
 |---|---|---|---|---|
-| 1 | **AI Marketing Strategist chatbot** | MINOR, T2 | `004-ai-strategist-chatbot.md` + USER DECISIONS pending | Turns the assistant into a consultant: Marketing Strategy Generator, Chart Intelligence, Consumer Intelligence, Competitor Intelligence, Campaign & Content Generator, plus six advanced features (Opportunity Detection, Predictive Insights, Automated SWOT, Persona Generator, KPI Advisor, What-if). Repositioned UI, streaming output. Questions from the agent must be answered first. |
-| 2 | **Intelligence modules** | MINOR, T2 | `005-intelligence-modules.md` + USER DECISIONS pending | Ten modules: Product Radar, Review Mining (ABSA), Competitor Benchmarking, Trend Discovery, Marketing Campaign Lab, Customer Segmentation (ML), Price Intelligence (anomaly detection), Brand Health Monitor, Market Opportunity Finder, Automated Business Reports (PDF/Excel/CSV/PPTX). Plus eight smaller features and full product CRUD in the UI. |
-| 3 | **Product CRUD in the UI** | MINOR, T1 | folded into `005` | The backend already has POST / PUT / DELETE and `import-from-emag`; the frontend has no way to use them. Add, edit, delete and import products from Product Analysis. |
-| 4 | **Reddit OAuth in production** | — | — | The connector supports OAuth; the team still has to register an app and put the credentials in `backend/.env`. Without them Reddit contributes nothing. |
-| 5 | **X/Twitter credits** | — | — | The free tier closed in February 2026. Only worth doing if the team funds credits. |
+| 1 | **Product CRUD in the UI + the two product bugs** | MINOR, T1 | `005` + USER DECISIONS 17:51 (Q1, Q4) | The backend already has POST / PUT / DELETE and `import-from-emag`; `src/services/api.js` exposes none of them and `ProductAnalysis.jsx` has no control. Also: `launch` cannot be created or edited (`schemas/product.py:8-21` omits it while `schemas/dto.py:34` returns it), and a duplicate SKU raises an unhandled `IntegrityError` → 500 instead of 409. **This is the single biggest gap the investigation found.** |
+| 2 | **Review Mining / ABSA** | MINOR, T2 | `005` + USER DECISIONS (Q1) | The aspect table already exists (`sentiment_analysis.py:44-122`, `analytics_service.py:141-167`). Add the reasons extracted from review text and exact mention counts. Zero new data needed. |
+| 3 | **Brand Health Monitor** | MINOR, T2 | `005` + USER DECISIONS (Q1) | Sentiment, SOV, mentions, themes, competitor comparison. Missing: per-brand sentiment trend and the explicit "only the sources we monitor" warning. |
+| 4 | **Price Intelligence** | MINOR, T2 | `005` + USER DECISIONS (Q1, Q7) | History, fluctuations, percentage differences, price vs rating. Rule-based anomaly detection only (4 points per product, one retailer). Add the `retailer` column now, populate eMAG only, label "1 retailer monitored". |
+| 5 | **Competitor Benchmarking** | MINOR, T2 | `005` + USER DECISIONS (Q1) | Sentiment, ratings, price positioning, price-vs-perception map, feature matrix. Missing: innovation indicators and real popularity. |
+| 6 | **Chart Intelligence v2** | MINOR, T2 | `004` + USER DECISIONS (Q1, Q3, Q5, Q7) | The stated differentiator and the first slice of the assistant work: anomalies, correlations, "why did it drop", the last 30 days (the `range` filter is not wired to any API). Plus the richer streaming render: delta append, typing cursor, code blocks, links, buffered tables, copy button. |
+| 7 | **Marketing Strategy Generator** | MINOR, T2 | `004` + USER DECISIONS (Q1, Q4) | The ten components: Market Research, Target Audience, Segmentation, Positioning, SWOT, Marketing Mix, Campaign Strategy, Budget Allocation, KPIs, Timeline — plus "why this strategy and which data supports it". |
+| 8 | **Campaign & Content Generator** | MINOR, T2 | `004` + USER DECISIONS (Q1) | Campaign ideas ranked, ad copy, slogans, social content, editorial calendar, influencer proposals, launch and retention campaigns. |
+| 9 | **Consumer + Competitor Intelligence in the assistant** | MINOR, T2 | `004` + USER DECISIONS (Q1) | Both share one review-analysis aggregator: preference extraction, complaint clustering, "why Apple over Samsung", positioning map, price-gap analysis, differentiation opportunities. |
+| 10 | **Assistant orchestrator + tool registry** | MINOR, T3 | `004` + USER DECISIONS (Q3, Q4, Q8) | Phase 0 of the assistant work: replace the keyword table (`assistant.py:53-60`) with tool selection, add the declarative action chips (whitelisted, executed only on a user click), the "Deep reasoning" toggle, and conversation persistence. |
+| 11 | **Automated Business Reports** | MINOR, T2 | `005` + USER DECISIONS (Q3, Q10) | Assemble the existing services into a report. CSV + Excel first, then PDF + PowerPoint. On demand only; no scheduler. |
+| 12 | **Product Radar + composite scores** | MINOR, T2 | `005` + USER DECISIONS (Q1, Q8) | Product Competitiveness Score, Trend Momentum (append-only history; the search component stays `null` until there are 2 points), Market Opportunity Score. |
+| 13 | **Customer Segmentation (ML) + Campaign Lab** | MINOR, T3 | `005` + USER DECISIONS (Q5, Q6, Q9) | Review-level audience segments with a silhouette quality score and an "exploratory, n=48" label. Campaign Lab as a scenario calculator with visible formulas, labelled "scenario, not prediction". |
+| 14 | **Reddit OAuth in production** | — | — | The connector supports OAuth; the team still has to register an app and put the credentials in `backend/.env`. Without them Reddit contributes nothing. |
+| 15 | **X/Twitter credits** | — | — | The free tier closed in February 2026. Only worth doing if the team funds credits. |
 
 ---
 
@@ -46,7 +58,9 @@ What the user owes: nothing right now. What is next: read the three reports, ver
 | 1.9.0 | **#4** `8dfcaa0` → `a988877` | **OpenRouter everywhere + non-blocking LLM** | `002` | `openrouter` is an advisor provider and the default; `/admin/reload` on the assistant; output budget from each model's `max_completion_tokens` with `reasoning.effort=high`; `extract_json` takes the outermost structure; the three LLM surfaces read cache-only and generate in a `BackgroundTask`; Reddit OAuth with `last_status`; default model `dots-studio/dots-3-note-preview:free`. PROOF: 70 pytest, 32 Playwright, build exit 0; live calls on all four surfaces; drawer 54 s → 0.1 s. |
 | 1.9.1 | `764bd88` | **Assistant grounded in live MySQL** | `002` | `load_market_data()` builds the context from the running API (`/analytics/overview`, `/brands`, `/products`, `/consumer-segments`, `/sentiment`, `/competitors`) and caches it 2 minutes; `market_data.json` only as a fallback, marked `source: "snapshot"`. **Why:** the assistant answered "Samsung 79, average 82.6" from the stale snapshot; MySQL says 82.9 and 76.1. PROOF: `load_market_data(force=True)` → `source=live`; live chat now answers 82.9 / 76.1. |
 
-**Investigations finished (no release):** `001-audit-and-integration.md` — the full audit, all nine questions answered.
+| 1.9.2 | `c3d3894` | **Three defects the spec investigation found** | `004` | `advisor.py:451` read `data["exampleRecommendations"][0]`, a key that exists only in the bundled snapshot; once the assistant moved to live data the endpoint raised KeyError and returned **500**. `scripts/start.ps1` and `start.sh` started `main:app` and Vite but **not** `backend/server.py`, so a clean `run.ps1` produced a dashboard whose Ask AI panel was dead. `specs/README.md` listed two specs that were never written. PROOF: endpoint 500 → 5 items; both launchers now read `VITE_AI_API_URL`, start the assistant, wait for `/health`, and stop it on exit; gate 70 pytest / build exit 0. |
+
+**Investigations finished (no release):** `001-audit-and-integration.md` — the full audit, all nine questions answered. `004-ai-strategist-chatbot.md` and `005-intelligence-modules.md` — both written by read-only Opus investigators, both carry a binding `USER DECISIONS` block from 2026-11-07 17:51 (`all rec`).
 
 ---
 

@@ -1235,3 +1235,25 @@ Invest in collection before analytics: daily price snapshots, multiple retailers
 ## USER DECISIONS (<yyyy-mm-dd hh:mm>, binding)
 
 _Appended by the orchestrator only, after the user answers. Not written by the investigator._
+
+## USER DECISIONS (2026-11-07 17:51, binding)
+
+Utilizatorul a răspuns: **„all rec"** — acceptă toate cele 10 recomandări din acest spec.
+
+Deciziile rezultate:
+
+1. **Q1 — Ordinea modulelor.** Primul val: CRUD produse + Review Mining + Brand Health + Price Intelligence + Competitor Benchmarking. Restul în valurile următoare.
+2. **Q2 — Librării noi.** Da, se adaugă în equirements.txt în același PR în care sunt folosite prima dată.
+3. **Q3 — Export rapoarte.** CSV + Excel acum; PDF + PowerPoint imediat după.
+4. **Q4 — Amploarea CRUD.** Adăugare, editare, ștergere, import eMAG, plus câmpul launch editabil. Fără import CSV în masă acum.
+5. **Q5 — Date insuficiente pentru ML.** Se afișează modulul cu eticheta „exploratory, n=48" și calitatea clusterelor; sub 30 de observații, „not enough data".
+6. **Q6 — Segmentare.** Segmente de audiență la nivel de recenzie, nu clienți inventați.
+7. **Q7 — Coloana etailer.** Se adaugă acum în price_history (additive), populată doar cu eMAG; UI-ul spune „1 retailer monitorizat".
+8. **Q8 — Trend Momentum.** Istoric append-only; componenta de căutare rămâne 
+ull până există minim 2 puncte.
+9. **Q9 — Campaign Lab.** Calculator de scenarii cu formule vizibile, etichetat „scenariu, nu predicție". Fără ML predictiv.
+10. **Q10 — Rapoarte programate.** Doar la cerere acum; programarea într-un PR ulterior.
+
+**Consecință:** primul PR este CRUD-ul de produse din UI plus cele două bug-uri găsite (launch needitabil, SKU duplicat → 409).
+
+by FiredMosquito831

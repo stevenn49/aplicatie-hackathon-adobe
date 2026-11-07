@@ -297,6 +297,8 @@ READ-ONLY: no git writes, no edits outside its scratchpad and the spec, never to
 | 1.8.0 | 2026-11-07 | #4 | One interactive launcher in the repo root (`run.ps1` / `run.sh`), a guided setup that detects Docker vs native MySQL and asks for each API key, a settings manager, and `POST /api/admin/reload` so a key applies without a restart. |
 | 1.9.0 | 2026-11-07 | #4 (merge `a988877`) | OpenRouter as an assistant provider and the default; output budget read from each model's metadata with `reasoning.effort=high`; JSON extraction takes the outermost structure; the three LLM surfaces read cache-only and generate in a background task; Reddit gains OAuth. Gate: **70 pytest passed / 3 skipped**, **32 Playwright passed**, build exit 0. Live OpenRouter calls verified on all four surfaces. |
 | 1.9.1 | 2026-11-07 | `764bd88` | The assistant now reads live MySQL through the API instead of `market_data.json`. It had been answering "Samsung 79, average 82.6" from the stale snapshot; MySQL holds 82.9 and 76.1. Verified live after a restart. |
+| 1.9.2 | 2026-11-07 | `c3d3894` | Three defects the spec investigation found: `advisor.py:451` raised KeyError on live data (endpoint 500 → 5 items); both launchers started `main:app` and Vite but not `backend/server.py`, so the Ask AI panel was dead after a clean start; `specs/README.md` listed two specs that were never written. |
+| — | 2026-11-07 | — | **Two investigations delivered and decided.** `004-ai-strategist-chatbot.md` (731 lines) and `005-intelligence-modules.md` (1,237 lines), both with ten numbered questions. The user answered **`all rec`** at 17:51; both specs carry a binding `USER DECISIONS` block and the queue now holds fifteen ordered items derived from them. |
 
 ---
 
