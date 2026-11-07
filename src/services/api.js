@@ -17,11 +17,18 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { signal } = {}) {
+async function request(path, { signal, method, body } = {}) {
   const url = `${API_URL}${path}`;
+  const headers = { Accept: "application/json" };
+  const init = { signal, headers };
+  if (method) init.method = method;
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
   let response;
   try {
-    response = await fetch(url, { signal, headers: { Accept: "application/json" } });
+    response = await fetch(url, init);
   } catch (error) {
     if (error.name === "AbortError") throw error;
     throw new ApiError(
@@ -87,6 +94,18 @@ export const getProductDetail = (id) => {
   if (id === null || id === undefined) return Promise.resolve(null);
   return request(`/api/products/${Number(id)}`);
 };
+
+export const createProduct = (payload) =>
+  request("/api/products/", { method: "POST", body: payload });
+
+export const updateProduct = (id, payload) =>
+  request(`/api/products/${Number(id)}`, { method: "PUT", body: payload });
+
+export const deleteProduct = (id) =>
+  request(`/api/products/${Number(id)}`, { method: "DELETE" });
+
+export const importProductFromEmag = (searchTerm, category) =>
+  request(`/api/products/import-from-emag${query({ query: searchTerm, category })}`, { method: "POST" });
 
 /* ------------------------------------------------------------------ */
 /* Brands                                                              */
