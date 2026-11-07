@@ -2,15 +2,15 @@ import json
 import logging
 from typing import List, Dict, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database.connection import get_db
+from database.connection import get_db, SessionLocal
 from database.models import Review as ReviewModel, Product as ProductModel
 from schemas.dto import MarketingDashboard, MarketingTrendPoint, MarketingOpportunity, Kpi
 from services.analytics_service import analytics_service, ASPECT_LABELS
-from services.llm_service import llm_service
+from services.llm_service import llm_service, extract_json
 
 logger = logging.getLogger("marketpulse.api.marketing")
 
@@ -82,12 +82,27 @@ def _derived_opportunities(db: Session) -> List[Dict[str, Any]]:
     return opportunities[:3]
 
 
+def _generate_opportunities(payload: dict) -> None:
+    """Runs after the response is sent; opens its own session."""
+    db = SessionLocal()
+    try:
+        llm_service.marketing_opportunities(payload, db)
+        logger.info("Background marketing opportunities generated")
+    except Exception as exc:
+        logger.warning(f"Background marketing opportunities failed: {exc}")
+    finally:
+        db.close()
+
+
 @router.get("/trends", response_model=MarketingDashboard)
-def get_marketing_dashboard(db: Session = Depends(get_db)):
+def get_marketing_dashboard(background: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Marketing analytics: weekly mention volume per brand and source, opportunity
     cards, KPI row and source distribution. The narrative is rewritten by the LLM
     when one is configured; the numbers never are.
+
+    The narrative is read from the cache only. A cache miss returns
+    `opportunities_source: "pending"` and the generation runs in the background.
     """
     trends = analytics_service.marketing_trends(db)
     source_volume = analytics_service.source_volume(db)
@@ -174,25 +189,28 @@ def get_marketing_dashboard(db: Session = Depends(get_db)):
                 )[:3]
             ],
         }
-        raw = llm_service.marketing_opportunities(payload, db)
+        raw = llm_service.marketing_opportunities(payload, db, cache_only=True)
         if raw:
-            try:
-                parsed = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
-                if isinstance(parsed, list) and parsed:
-                    colors = ["var(--positive)", "var(--accent)", "var(--neutral)"]
-                    opportunities = [
-                        {
-                            "title": str(item.get("title", ""))[:80],
-                            "type": str(item.get("type", "CONTENT OPPORTUNITY"))[:40],
-                            "detail": str(item.get("detail", ""))[:220],
-                            "impact": str(item.get("impact", ""))[:24],
-                            "color": colors[index % len(colors)],
-                        }
-                        for index, item in enumerate(parsed[:3])
-                    ]
-                    source = "llm"
-            except Exception:
+            parsed = extract_json(raw)
+            if isinstance(parsed, list) and parsed:
+                colors = ["var(--positive)", "var(--accent)", "var(--neutral)"]
+                opportunities = [
+                    {
+                        "title": str(item.get("title", ""))[:80],
+                        "type": str(item.get("type", "CONTENT OPPORTUNITY"))[:40],
+                        "detail": str(item.get("detail", ""))[:220],
+                        "impact": str(item.get("impact", ""))[:24],
+                        "color": colors[index % len(colors)],
+                    }
+                    for index, item in enumerate(parsed[:3])
+                    if isinstance(item, dict)
+                ]
+                source = "llm" if opportunities else "derived"
+            else:
                 logger.warning("LLM opportunities were not valid JSON; using the derived set")
+        elif llm_service.enabled:
+            background.add_task(_generate_opportunities, payload)
+            source = "pending"
 
     if not opportunities:
         opportunities = _derived_opportunities(db)

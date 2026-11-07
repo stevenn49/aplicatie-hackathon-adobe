@@ -1,9 +1,10 @@
 """MarketPulse AI marketing advisor, powered by free AI models.
 
 Supported providers (all speak the OpenAI-compatible chat API):
-  groq        free tier, very fast, needs a free key       https://console.groq.com/keys
-  gemini      Google AI Studio free tier, free key         https://aistudio.google.com/apikey
-  ollama      runs models on your own PC, no key, offline  https://ollama.com/download (default)
+  openrouter  free models, one key for all of them       https://openrouter.ai/keys (default)
+  groq        free tier, very fast, needs a free key     https://console.groq.com/keys
+  gemini      Google AI Studio free tier, free key       https://aistudio.google.com/apikey
+  ollama      runs models on your own PC, no key, offline https://ollama.com/download
 
 Pick one with AI_PROVIDER in backend/.env (or --provider on the CLI).
 Core logic shared by the CLI (marketing_advisor.py) and the API (server.py).
@@ -21,9 +22,18 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
+DEFAULT_OPENROUTER_MODEL = "stealth/crouton-alpha"
+
 # Default models are tried in order; free models change often, so override them with
 # AI_MODELS=a,b,c in .env and run `python marketing_advisor.py --list-models` to see options.
 PROVIDERS = {
+    "openrouter": {
+        "url": "https://openrouter.ai/api/v1",
+        "key_env": "OPENROUTER_API_KEY",
+        "signup": "https://openrouter.ai/keys",
+        # OPENROUTER_MODEL overrides this list; the fallbacks are free models.
+        "models": [DEFAULT_OPENROUTER_MODEL],
+    },
     "groq": {
         "url": "https://api.groq.com/openai/v1",
         "key_env": "GROQ_API_KEY",
@@ -44,6 +54,8 @@ PROVIDERS = {
     },
 }
 
+DEFAULT_PROVIDER = "openrouter"
+
 PROVIDER = ""
 API_KEY = ""
 MODELS: list[str] = []
@@ -51,16 +63,23 @@ TIMEOUT = int(os.getenv("AI_TIMEOUT", "120"))
 
 
 def set_provider(name: str | None = None) -> None:
-    """Select the provider (defaults to AI_PROVIDER from .env, else ollama)."""
+    """Select the provider (defaults to AI_PROVIDER from .env, else openrouter)."""
     global PROVIDER, API_KEY, MODELS
-    name = (name or os.getenv("AI_PROVIDER") or "ollama").lower()
+    name = (name or os.getenv("AI_PROVIDER") or DEFAULT_PROVIDER).lower()
     if name not in PROVIDERS:
         raise AdvisorError(f"Unknown provider '{name}'. Choose one of: {', '.join(PROVIDERS)}")
     PROVIDER = name
     cfg = PROVIDERS[name]
     API_KEY = os.getenv(cfg["key_env"], "") if cfg["key_env"] else "ollama"
+
     override = os.getenv("AI_MODELS", "")
-    MODELS = [m.strip() for m in override.split(",") if m.strip()] or list(cfg["models"])
+    models = [m.strip() for m in override.split(",") if m.strip()]
+    if not models and name == "openrouter":
+        # The same model the main API uses, so one setting drives both surfaces.
+        configured = os.getenv("OPENROUTER_MODEL", "").strip()
+        if configured:
+            models = [configured]
+    MODELS = models or list(cfg["models"])
 
 
 CATEGORIES = ["Product", "Consumer", "Marketing", "Competitive"]
@@ -128,6 +147,11 @@ def chat(messages: list[dict], json_mode: bool = False, temperature: float = 0.6
         raise AdvisorError("No Ollama models installed. Run e.g. `ollama pull llama3.2` first.")
     url = f"{cfg['url']}/chat/completions"
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    if PROVIDER == "openrouter":
+        # OpenRouter attributes traffic by these headers; they are optional but
+        # they make the app visible in the account's activity page.
+        headers["HTTP-Referer"] = os.getenv("OPENROUTER_APP_URL", "http://localhost:5173")
+        headers["X-Title"] = os.getenv("OPENROUTER_APP_NAME", "MarketPulse AI")
     errors = []
     for model in models:
         body = {"model": model, "messages": messages, "temperature": temperature}
@@ -201,6 +225,9 @@ def stream_chat(messages: list[dict], temperature: float = 0.6):
                 })
             else:
                 headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+                if PROVIDER == "openrouter":
+                    headers["HTTP-Referer"] = os.getenv("OPENROUTER_APP_URL", "http://localhost:5173")
+                    headers["X-Title"] = os.getenv("OPENROUTER_APP_NAME", "MarketPulse AI")
                 resp = requests.post(f"{cfg['url']}/chat/completions", headers=headers, stream=True, timeout=TIMEOUT,
                                      json={"model": model, "messages": messages, "temperature": temperature, "stream": True})
         except requests.ConnectionError as exc:

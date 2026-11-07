@@ -163,7 +163,7 @@ function Edit-OpenRouter {
     Write-Step "OpenRouter (LLM)"
     $currentKey = Get-EnvValue -Path $BackendEnv -Key "OPENROUTER_API_KEY"
     $currentModel = Get-EnvValue -Path $BackendEnv -Key "OPENROUTER_MODEL"
-    if (-not $currentModel) { $currentModel = "stealth/crouton-alpha" }
+    if (-not $currentModel) { $currentModel = "dots-studio/dots-3-note-preview:free" }
 
     Write-Note "Key:   $(Mask $currentKey)"
     Write-Note "Model: $currentModel"
@@ -210,18 +210,35 @@ function Edit-OpenRouter {
 function Edit-Assistant {
     Write-Step "AI assistant (backend/server.py)"
     $currentProvider = Get-EnvValue -Path $BackendEnv -Key "AI_PROVIDER"
-    Write-Note "Provider: $(if ($currentProvider) { $currentProvider } else { '(not set)' })"
+    if (-not $currentProvider) { $currentProvider = "openrouter" }
+    $openRouterKey = Get-EnvValue -Path $BackendEnv -Key "OPENROUTER_API_KEY"
+    $openRouterModel = Get-EnvValue -Path $BackendEnv -Key "OPENROUTER_MODEL"
+
+    Write-Note "Current provider: $currentProvider"
+    if ($currentProvider -eq "openrouter") {
+        Write-Note "Uses OPENROUTER_API_KEY ($(Mask $openRouterKey)) and model $(if ($openRouterModel) { $openRouterModel } else { '(none)' })"
+    }
     Write-Host ""
-    Write-Host "      [1]  ollama  (local, no key)" -ForegroundColor Gray
-    Write-Host "      [2]  groq    (free key)" -ForegroundColor Gray
-    Write-Host "      [3]  gemini  (free key)" -ForegroundColor Gray
-    Write-Host "      [4]  Disable the assistant" -ForegroundColor Gray
-    Write-Host "      [5]  Back" -ForegroundColor DarkGray
+    Write-Host "      [1]  openrouter  reuses the OpenRouter key and model  (default)" -ForegroundColor Gray
+    Write-Host "      [2]  ollama      local, no key" -ForegroundColor Gray
+    Write-Host "      [3]  groq        free key" -ForegroundColor Gray
+    Write-Host "      [4]  gemini      free key" -ForegroundColor Gray
+    Write-Host "      [5]  Disable the assistant" -ForegroundColor Gray
+    Write-Host "      [6]  Back" -ForegroundColor DarkGray
     Write-Host ""
 
-    $choice = Read-Choice -Prompt "Which provider?" -Options @("1", "2", "3", "4", "5") -Default "5"
+    $choice = Read-Choice -Prompt "Which provider?" -Options @("1", "2", "3", "4", "5", "6") -Default "6"
     switch ($choice) {
         "1" {
+            Set-EnvValue -Path $BackendEnv -Key "AI_PROVIDER" -Value "openrouter"
+            Set-AssistantUrl
+            if ($openRouterKey) {
+                Write-Ok "Assistant -> openrouter, model $(if ($openRouterModel) { $openRouterModel } else { '(none)' })"
+            } else {
+                Write-Warn "No OpenRouter key yet; set one with option 4 in the main menu."
+            }
+        }
+        "2" {
             $url = Read-Text -Prompt "Ollama URL" -Default $(if (Get-EnvValue -Path $BackendEnv -Key "OLLAMA_URL") { Get-EnvValue -Path $BackendEnv -Key "OLLAMA_URL" } else { "http://localhost:11434" })
             Set-EnvValue -Path $BackendEnv -Key "AI_PROVIDER" -Value "ollama"
             Set-EnvValue -Path $BackendEnv -Key "OLLAMA_URL" -Value $url
@@ -229,7 +246,7 @@ function Edit-Assistant {
             Write-Ok "Assistant -> ollama at $url"
             Write-Note "Pull a model once: ollama pull llama3.2"
         }
-        "2" {
+        "3" {
             $key = Read-Secret -Prompt "Groq API key" -Default (Get-EnvValue -Path $BackendEnv -Key "GROQ_API_KEY")
             Set-EnvValue -Path $BackendEnv -Key "AI_PROVIDER" -Value "groq"
             if ($key) { Set-EnvValue -Path $BackendEnv -Key "GROQ_API_KEY" -Value $key; Write-Ok "Groq key saved ($(Mask $key))" }
@@ -237,7 +254,7 @@ function Edit-Assistant {
             Set-AssistantUrl
             Write-Ok "Assistant -> groq"
         }
-        "3" {
+        "4" {
             $key = Read-Secret -Prompt "Gemini API key" -Default (Get-EnvValue -Path $BackendEnv -Key "GEMINI_API_KEY")
             Set-EnvValue -Path $BackendEnv -Key "AI_PROVIDER" -Value "gemini"
             if ($key) { Set-EnvValue -Path $BackendEnv -Key "GEMINI_API_KEY" -Value $key; Write-Ok "Gemini key saved ($(Mask $key))" }
@@ -245,7 +262,7 @@ function Edit-Assistant {
             Set-AssistantUrl
             Write-Ok "Assistant -> gemini"
         }
-        "4" {
+        "5" {
             Set-EnvValue -Path $BackendEnv -Key "AI_PROVIDER" -Value ""
             Set-EnvValue -Path $FrontendEnv -Key "VITE_AI_API_URL" -Value ""
             Write-Ok "Assistant disabled"
@@ -410,9 +427,10 @@ while ($true) {
     if (-not $port) { $port = "8010" }
 
     if ($reloadable) {
-        $result = Invoke-ApiReload -BackendPort ([int]$port)
+        $assistantUrl = Get-EnvValue -Path $FrontendEnv -Key "VITE_AI_API_URL"
+        $result = Invoke-ApiReload -BackendPort ([int]$port) -AssistantUrl $assistantUrl
         if ($result -eq "not-running") {
-            Write-Note "The API is not running; the change applies the next time you start it."
+            Write-Note "Neither service is running; the change applies the next time you start them."
         } elseif ($result -eq "failed") {
             Write-Note "Restart the app to be sure the change is applied."
         }

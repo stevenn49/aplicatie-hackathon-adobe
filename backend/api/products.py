@@ -1,10 +1,10 @@
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, Depends, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from database.connection import get_db
+from database.connection import get_db, SessionLocal
 from database.models import Product as ProductModel, PriceHistory as PriceHistoryModel, Review as ReviewModel
 from schemas.product import (
     Product,
@@ -28,6 +28,21 @@ router = APIRouter(
     prefix="/api/products",
     tags=["Products"]
 )
+
+
+def _generate_review_summary(product_name: str, brand: str, stats: dict) -> None:
+    """
+    Runs after the response is sent. Opens its own session because the request's
+    session is already closed by then.
+    """
+    db = SessionLocal()
+    try:
+        llm_service.review_summary(product_name, brand, stats, db)
+        logger.info(f"Background review summary generated for '{product_name}'")
+    except Exception as exc:
+        logger.warning(f"Background review summary failed for '{product_name}': {exc}")
+    finally:
+        db.close()
 
 
 def _review_stats(reviews: List[ReviewModel]) -> dict:
@@ -205,10 +220,15 @@ def compare_products(
 
 
 @router.get("/{product_id}", response_model=ProductDetail)
-def get_product(product_id: int, db: Session = Depends(get_db)):
+def get_product(product_id: int, background: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Full product detail for the drawer: card data, price history, a linear
     forecast, the review list, and an LLM summary when the model is configured.
+
+    The summary is read from the cache only. A reasoning model takes 15-100
+    seconds, which would hold the drawer open, so a cache miss returns the
+    derived text with `review_summary_source: "pending"` and the generation runs
+    in the background; the next request finds it cached.
     """
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not product:
@@ -275,7 +295,19 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
     stats["aspects"] = {
         name: data["score"] for name, data in analytics_service.aspect_breakdown(reviews).items()
     }
-    summary = llm_service.review_summary(product.name, product.brand, stats, db)
+
+    summary = llm_service.review_summary(
+        product.name, product.brand, stats, db, cache_only=True
+    )
+
+    if summary:
+        summary_source = "llm"
+    elif llm_service.enabled and reviews:
+        # Not cached yet: generate it in the background so the drawer opens now.
+        background.add_task(_generate_review_summary, product.name, product.brand, stats)
+        summary_source = "pending"
+    else:
+        summary_source = "unavailable"
 
     return ProductDetail(
         product=card,
@@ -283,7 +315,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
         forecast=forecast,
         reviews=review_items,
         review_summary=summary,
-        review_summary_source="llm" if summary else "unavailable",
+        review_summary_source=summary_source,
     )
 
 

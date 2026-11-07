@@ -1,11 +1,11 @@
 import json
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, Query, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Query, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database.connection import get_db
+from database.connection import get_db, SessionLocal
 from database.models import Product as ProductModel, Review as ReviewModel, PriceHistory as PriceHistoryModel, TrendMetric as TrendMetricModel
 from schemas.analytics import (
     AnalyticsOverview,
@@ -28,7 +28,7 @@ from services.sentiment_analysis import sentiment_service
 from services.forecasting import forecasting_service
 from services.recommendations import recommendation_service
 from services.analytics_service import analytics_service, ASPECT_LABELS
-from services.llm_service import llm_service
+from services.llm_service import llm_service, extract_json
 from data_collection.trends import trend_collector
 
 logger = logging.getLogger("marketpulse.api.analytics")
@@ -153,8 +153,21 @@ def get_competitors(db: Session = Depends(get_db)):
     return CompetitorDashboard(**analytics_service.competitor_dashboard(db))
 
 
+def _generate_executive_summary(payload: dict) -> None:
+    """Runs after the response is sent; opens its own session."""
+    db = SessionLocal()
+    try:
+        llm_service.executive_summary(payload, db)
+        logger.info("Background executive summary generated")
+    except Exception as exc:
+        logger.warning(f"Background executive summary failed: {exc}")
+    finally:
+        db.close()
+
+
 @router.get("/recommendations", response_model=RecommendationsDashboard)
 def get_recommendations(
+    background: BackgroundTasks,
     category: Optional[str] = Query(None, description="Product | Consumer | Marketing | Competitive"),
     limit: int = Query(20, ge=1, le=50),
     db: Session = Depends(get_db)
@@ -163,6 +176,10 @@ def get_recommendations(
     Recommendations with an executive summary. The numbers always come from the
     derived engine; the wording is rewritten by the LLM when one is configured,
     and the response says which source produced the text.
+
+    The summary is read from the cache only. A reasoning model takes 15-100
+    seconds, so a cache miss returns `source: "pending"` and the generation runs
+    in the background; the next request finds it cached.
     """
     items = analytics_service.recommendations(db)
     if category and category.lower() != "all":
@@ -183,6 +200,7 @@ def get_recommendations(
         readiness = round(0.7 * sentiment + 0.3 * (100.0 - pressure), 1)
 
     summary_text = None
+    summary_pending = False
     if items:
         payload = {
             "average_sentiment": sentiment,
@@ -198,20 +216,36 @@ def get_recommendations(
                 for item in items[:8]
             ],
         }
-        raw = llm_service.executive_summary(payload, db)
+        raw = llm_service.executive_summary(payload, db, cache_only=True)
         if raw:
-            try:
-                parsed = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
+            parsed = extract_json(raw)
+            if isinstance(parsed, dict) and parsed.get("headline") and parsed.get("body"):
                 summary_text = (
-                    str(parsed.get("headline", "")).strip(),
-                    str(parsed.get("body", "")).strip(),
+                    str(parsed["headline"]).strip(),
+                    str(parsed["body"]).strip(),
                 )
-            except Exception:
+            else:
                 logger.warning("LLM executive summary was not valid JSON; using the derived text")
+        elif llm_service.enabled:
+            background.add_task(_generate_executive_summary, payload)
+            summary_pending = True
 
     if summary_text:
         headline, body = summary_text
         source = "llm"
+    elif summary_pending:
+        top = items[0] if items else None
+        headline = (
+            f"Highest-impact move: {top['title'][0].lower()}{top['title'][1:]}."
+            if top else "Not enough data for a recommendation yet."
+        )
+        body = (
+            f"{len(items)} signals were derived from {len(reviews)} stored reviews"
+            + (f" at an average sentiment of {sentiment:.0f}/100" if sentiment is not None else "")
+            + (f", with {high_priority} high-priority action{'s' if high_priority != 1 else ''}" if high_priority else "")
+            + ". The written summary is being generated; reload in a moment."
+        )
+        source = "pending"
     else:
         top = items[0] if items else None
         headline = (

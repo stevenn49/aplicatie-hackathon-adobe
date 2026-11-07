@@ -152,7 +152,12 @@ export default function MarketingAnalytics() {
         <div className="section-title">
           <div><div className="eyebrow">THE NEXT MOVE</div><h2>Opportunities worth acting on</h2></div>
           <span className="ai-identified">
-            <Lightbulb size={14} /> {opportunitySource === "llm" ? "AI identified" : "Derived from stored data"}
+            <Lightbulb size={14} />{" "}
+            {opportunitySource === "llm"
+              ? "AI identified"
+              : opportunitySource === "pending"
+                ? "Derived now; the AI version is generating"
+                : "Derived from stored data"}
           </span>
         </div>
         <div className="opportunity-grid">

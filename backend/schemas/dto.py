@@ -64,7 +64,7 @@ class ProductDetail(BaseModel):
     forecast: List[PricePoint] = []
     reviews: List[ProductReviewItem] = []
     review_summary: Optional[str] = None       # LLM text, None when the LLM is off
-    review_summary_source: str = "unavailable"  # "llm" | "unavailable"
+    review_summary_source: str = "unavailable"  # "llm" | "pending" | "unavailable"
 
 
 # --------------------------------------------------------------------------- #
@@ -232,7 +232,7 @@ class MarketingOpportunity(BaseModel):
 class MarketingDashboard(BaseModel):
     trends: List[MarketingTrendPoint] = []
     opportunities: List[MarketingOpportunity] = []
-    opportunities_source: str = "derived"      # "llm" | "derived"
+    opportunities_source: str = "derived"      # "llm" | "pending" | "derived"
     kpis: List[Kpi] = []
     source_volume: List[Dict[str, Any]] = []
 
@@ -289,7 +289,7 @@ class InsightCard(BaseModel):
 class ExecutiveSummary(BaseModel):
     headline: str
     body: str
-    source: str = "derived"                    # "llm" | "derived"
+    source: str = "derived"                    # "llm" | "pending" | "derived"
     readiness: Optional[float] = None          # 0-100
     avg_confidence: Optional[float] = None
 

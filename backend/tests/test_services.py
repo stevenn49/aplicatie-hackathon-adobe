@@ -174,3 +174,53 @@ def test_google_trends_returns_empty_when_unavailable(monkeypatch):
     connector = GoogleTrendsConnector()
     connector._pytrends = None  # force the unavailable path
     assert connector.get_interest("some keyword") == []
+
+
+# --------------------------------------------------------------------------- #
+# LLM response handling
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ('{"headline": "a", "body": "b"}', {"headline": "a", "body": "b"}),
+        ('```json\n{"headline": "a", "body": "b"}\n```', {"headline": "a", "body": "b"}),
+        ('Here is the JSON:\n{"headline": "a", "body": "b"}\nHope it helps.', {"headline": "a", "body": "b"}),
+        ('[{"title": "one"}, {"title": "two"}]', [{"title": "one"}, {"title": "two"}]),
+        ("```\n[{\"title\": \"one\"}]\n```", [{"title": "one"}]),
+    ],
+)
+def test_extract_json_handles_model_wrapping(raw, expected):
+    """
+    Reasoning models wrap JSON in prose or a code fence. A correct answer must
+    not be discarded because of the wrapper.
+    """
+    from services.llm_service import extract_json
+
+    assert extract_json(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", None, "no json here", "{broken", "```\n\n```"])
+def test_extract_json_returns_none_for_junk(raw):
+    from services.llm_service import extract_json
+
+    assert extract_json(raw) is None
+
+
+def test_llm_budget_is_capped_by_the_model_limit(monkeypatch):
+    """
+    The service reads each model's own max_completion_tokens and never asks for
+    more than the model accepts.
+    """
+    from services.llm_service import llm_service
+
+    monkeypatch.setattr(llm_service, "model_limits", lambda model=None: {"max_completion_tokens": 4096})
+    assert llm_service._budget(65536) == 4096
+    assert llm_service._budget(1000) == 1000
+
+
+def test_llm_budget_falls_back_when_limits_are_unknown(monkeypatch):
+    from services.llm_service import llm_service
+
+    monkeypatch.setattr(llm_service, "model_limits", lambda model=None: {})
+    assert llm_service._budget(65536) == 65536
